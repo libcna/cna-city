@@ -85,6 +85,8 @@ Four simulation defects are recorded in the source:
 | Metro passengers waited forever | Routes were planned with an interchange, but a passenger can only board a train that serves their destination | 443 people still standing on platforms at three in the morning |
 | Total gridlock | Every car was spawned at the head of its first segment, so two drivers leaving the same street seconds apart spawned *inside* each other; the IDM answers a negative gap with maximum braking, for ever | 4 000 vehicles at a mean speed of 0.2 m/s that read as congestion and was not |
 | Total gridlock, again | Signalising every junction whose highest class was a collector put lights on nine junctions in fourteen; queues on the short segments grew back past their own entrances | The fleet stopped draining between peaks |
+| Nobody ever went to work | A decision pass offers an eighth of the population and plans a few hundred; every other candidate had its "already commuted today" bit set anyway | 99 000 of 100 000 citizens still at home at half past eight, and staying there all day |
+| Half the city stopped deciding | The decision stride cycled on the tick counter, which was correct only while decisions ran on every tick; once they moved onto simulated time the sequence became 0, 2, 4, 6 and the four odd strides were never selected | The population on foot at the peak fell from six thousand to two -- a change that looks like tuning |
 
 The movement integrator now sub-steps at a fixed half second regardless of the clock, junctions are
 signalised only where three arterial arms meet (120 of 1 476), and a vehicle that has not moved for
@@ -166,12 +168,12 @@ at 30 ticks per second of wall clock and a time scale of 60.
 
 | agents | setup | mean | p99 | worst | decide | walk | crowd | traffic | memory | peak travelling |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 000 | 19 ms | 0.29 ms | 0.41 ms | 2.97 ms | 0.01 | 0.01 | 0.12 | 0.15 | 7.5 MB | 80 |
-| 10 000 | 19 ms | 0.54 ms | 0.85 ms | 8.62 ms | 0.06 | 0.09 | 0.13 | 0.18 | 9.0 MB | 715 |
-| 50 000 | 21 ms | 1.59 ms | 2.66 ms | 9.73 ms | 0.19 | 0.43 | 0.26 | 0.27 | 15.9 MB | 3 882 |
-| 100 000 | 24 ms | 2.57 ms | 4.33 ms | 16.26 ms | 0.27 | 0.59 | 0.35 | 0.44 | 24.5 MB | 9 230 |
+| 1 000 | 19 ms | 0.28 ms | 0.39 ms | 8.13 ms | 0.01 | 0.01 | 0.11 | 0.15 | 7.5 MB | 80 |
+| 10 000 | 19 ms | 0.50 ms | 0.78 ms | 4.68 ms | 0.08 | 0.09 | 0.12 | 0.17 | 9.0 MB | 715 |
+| 50 000 | 26 ms | 1.47 ms | 2.38 ms | 11.45 ms | 0.30 | 0.41 | 0.24 | 0.26 | 15.9 MB | 3 977 |
+| 100 000 | 24 ms | 2.29 ms | 3.70 ms | 7.71 ms | 0.51 | 0.53 | 0.33 | 0.40 | 24.5 MB | 9 102 |
 
-**A hundred times the agents costs 8.9 times the tick.** That is not an accident and it is the most
+**A hundred times the agents costs 8.1 times the tick.** That is not an accident and it is the most
 interesting number the program produces: the route cache's hit rate *rises* with population — 8% at
 a thousand agents, 23% at ten thousand, 32% at fifty thousand, 38% at a hundred thousand — because
 citizens do not have uniformly random destinations. They go to the same few thousand doorways, and
@@ -179,24 +181,36 @@ the more of them there are the more often somebody has already made the trip. Th
 linearly is the movement of the people actually outdoors, and at the morning peak that is 9% of the
 population rather than all of it.
 
-The worst-case tick is four to six times the mean in every run. It is the morning peak's burst of
-route planning, which is why the planner has a per-tick budget and defers the overflow.
+The worst-case tick is three to eight times the mean. It is the morning peak's burst of route
+planning, which is why the planner has a per-pass budget of 320 -- a number taken from the measured
+cost of a plan, about 13 microseconds averaged over cache hits and misses -- and defers the
+overflow. Before that budget existed at its current size, a single decision pass on the evening peak
+cost **11.6 ms**, which was the largest item in the frame and larger than the entire renderer.
 
 ### Rendering
 
 1600 × 900, high quality, `--agents 100000`, all four shadow cascades, HDR with ACES, bloom and
 FXAA.
 
-| view | frame | simulation | shadows | scene | instanced | draws | triangles |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| city overview, 400 m up | 15.3 ms (65 fps) | 15.4 ms | 6.7 ms | 4.7 ms | 1.5 ms | 442 | 173 k |
-| street level | 12.4 ms (80 fps) | 4.1 ms | 1.7 ms | 1.8 ms | 1.5 ms | 210 | 73 k |
-| chase camera on one citizen | 11.7 ms (86 fps) | 2.1 ms | 1.0 ms | 0.9 ms | 1.0 ms | 189 | 58 k |
+Taken at 07:30 on a city that has been running long enough to have 15 000 people at work, 2 800 on
+foot, 1 900 driving at a mean 2.1 m/s with 177 of them queuing, and 550 on the underground.
 
-The simulation and the frame overlap in wall-clock terms only in the sense that both happen; they
-are serial here, and at a hundred thousand agents from an overview the simulation is the larger of
-the two. **That is the bottleneck this demo was built to find**, and it is not in the renderer: the
-static city is 220 000 triangles in 121 chunks, which a 780M draws without noticing.
+| view | frame | simulation | draw | shadows | scene | draws | triangles |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| city overview, 400 m up | 14.5 ms (69 fps) | 2.1 ms | 13.1 ms | 5.2 ms | 5.7 ms | 464 | 169 k |
+| chase camera on one citizen | 9.9 ms (101 fps) | 5.0 ms | 9.8 ms | 3.6 ms | 3.3 ms | 221 | 75 k |
+| street level | 8.6 ms (116 fps) | 3.1 ms | 5.6 ms | 1.5 ms | 1.5 ms | 157 | 32 k |
+
+The simulation and the draw are serial here, and which of them dominates depends entirely on where
+the camera is: from four hundred metres up the four shadow cascades and the visible chunk count put
+the renderer ahead, and at street level the simulation is the larger of the two even though almost
+nothing is on screen. **That is the answer this demo was built to get**, and it is not the one a
+graphics demo would expect: the static city is 220 000 triangles in 121 chunks, which a 780M draws
+without noticing, and the cost is in the hundred thousand daily routines behind it.
+
+The frame time reported here is the whole frame, taken from the harness. Timing only the body of
+`Draw` was the first version and it reported 65 fps for a frame that also spent fifteen milliseconds
+in `Update` -- a program built to measure something must not be the thing that is measured wrongly.
 
 Static geometry is 25.3 MB of vertex and index buffers; the procedural textures are 11.5 MB
 including their mip chains; the simulation is 24.5 MB. The whole city is under 65 MB.

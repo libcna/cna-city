@@ -103,17 +103,18 @@ On an AMD Radeon 780M with 16 threads, at a hundred thousand citizens:
 | | |
 |---|---|
 | City generation, from one seed | **24 ms** — 204 km of road, 1 072 blocks, 11 808 buildings |
-| Simulation tick, mean / p99 | **2.57 ms / 4.33 ms** |
-| Frame, street level, 1600x900 high | **12.4 ms (80 fps)** |
-| Frame, city overview, all four shadow cascades | **15.3 ms (65 fps)** |
+| Simulation tick, mean / p99 | **2.29 ms / 3.70 ms** |
+| Frame, street level, 1600x900 high | **8.6 ms (116 fps)** |
+| Frame, city overview, all four shadow cascades | **14.5 ms (69 fps)** |
 | Total resident memory | **under 65 MB** |
 
-**A hundred times the agents costs 8.9 times the tick, not a hundred.** The route cache's hit rate
+**A hundred times the agents costs 8.1 times the tick, not a hundred.** The route cache's hit rate
 *rises* with population — 8% at a thousand agents, 38% at a hundred thousand — because citizens do
 not have random destinations, they go to the same few thousand doorways.
 
-And the bottleneck is not where a graphics demo would put it: from an overview at a hundred thousand
-agents the *simulation* costs more than the frame. The whole static city is 220 000 triangles.
+And which half of the program dominates depends on where the camera is: from four hundred metres up
+the shadow cascades put the renderer ahead, and at street level the simulation is the larger of the
+two even with almost nothing on screen. The whole static city is 220 000 triangles.
 
 Two things CNA could not do here are written down as plainly as the things it could: thousands of
 street lights cannot be real lights while a surface also needs a texture set, and there is no vertex
