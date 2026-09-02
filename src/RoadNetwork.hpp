@@ -150,6 +150,27 @@ namespace CnaCity
         /** @brief The nearest node reachable only over roads of class @p maxClass or better. */
         [[nodiscard]] std::uint32_t FindNearestNodeOfClass(Vec2 point, RoadClass maxClass) const;
 
+        /** @brief The segment joining @p a and @p b, or 0xFFFFFFFF when they are not neighbours. */
+        [[nodiscard]] std::uint32_t FindSegmentBetween(std::uint32_t a, std::uint32_t b) const
+        {
+            const RoadNode& node = nodes_[a];
+            for (std::uint16_t k = 0; k < node.incidentCount; ++k)
+            {
+                const Incidence& inc = incident_[node.firstIncident + k];
+                if (inc.other == b) return inc.segment;
+            }
+            return 0xFFFFFFFFu;
+        }
+
+        /** @brief Where @p segment sits in @p node's incidence list; used for signal groups. */
+        [[nodiscard]] std::uint32_t IncidenceSlot(std::uint32_t node, std::uint32_t segment) const
+        {
+            const RoadNode& n = nodes_[node];
+            for (std::uint16_t k = 0; k < n.incidentCount; ++k)
+                if (incident_[n.firstIncident + k].segment == segment) return n.firstIncident + k;
+            return 0xFFFFFFFFu;
+        }
+
         [[nodiscard]] float TotalLength() const;
 
     private:

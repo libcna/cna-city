@@ -33,6 +33,14 @@ set(CNA_SHARP_RUNTIME_ROOT
 # one consumer in the workspace that turns it on unconditionally rather than as an option.
 set(CNA_CNAEXT ON CACHE BOOL "Enable the CNAEXT extended graphics layer" FORCE)
 
+# cna-city reaches for System::Threading::Tasks::Parallel, which is not in CNA's own component
+# closure -- sharp-runtime instantiates a component only when something asks for it, so the target
+# would not exist and the include path would not propagate. Naming the closure here, before CNA is
+# added, is the supported way to widen it.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../cnanext/cmake/SharpRuntimeConsumption.cmake")
+set(SHARP_RUNTIME_COMPONENTS "${CNA_SHARP_RUNTIME_DEFAULT_COMPONENTS};Threading.Tasks;Diagnostics"
+    CACHE STRING "Sharp Runtime components required by cna-city")
+
 set(CNA_BUILD_TESTS    OFF CACHE BOOL "Build CNA tests")
 set(CNA_BUILD_EXAMPLES OFF CACHE BOOL "Build CNA examples")
 set(SHARP_RUNTIME_BUILD_TESTS OFF CACHE BOOL "Build sharp-runtime tests")
@@ -45,6 +53,13 @@ add_executable(cna-city
     src/CityMath.cpp
     src/RoadNetwork.cpp
     src/City.cpp
+    src/MetroNetwork.cpp
+    src/Pathfinder.cpp
+    src/WorldState.cpp
+    src/JobSystem.cpp
+    src/Agents.cpp
+    src/Traffic.cpp
+    src/Simulation.cpp
 )
 
 target_include_directories(cna-city PRIVATE src)
@@ -56,7 +71,7 @@ target_link_libraries(cna-city PRIVATE Threads::Threads)
 # CNA links what it needs itself, but cna-city reaches for System::Diagnostics::Stopwatch and
 # System::Threading::Tasks::Parallel directly, so it names those components rather than relying on
 # CNA's linkage staying PUBLIC.
-foreach(_component Core.Base Threading Threading.Tasks)
+foreach(_component Core.Base Threading Threading.Tasks Diagnostics)
     if(TARGET SharpRuntime::${_component})
         target_link_libraries(cna-city PRIVATE SharpRuntime::${_component})
     endif()
@@ -79,3 +94,4 @@ if(EMSCRIPTEN)
         "-sMAX_WEBGL_VERSION=2"
     )
 endif()
+

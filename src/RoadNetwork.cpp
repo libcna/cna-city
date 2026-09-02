@@ -254,12 +254,31 @@ namespace CnaCity
                       [](const Incidence& a, const Incidence& b) { return a.heading < b.heading; });
         }
 
-        // A junction is signalised when at least three roads meet and one of them carries enough
-        // traffic to need it. Everything else is a give-way, which the traffic model treats as a
-        // priority rule rather than a light.
+        // A junction is signalised when at least three roads meet and one of them is an arterial
+        // or better. Everything else is a give-way.
+        //
+        // The threshold used to include collectors, and the difference that made is worth
+        // recording: every third street in every district is a collector, so nine junctions in ten
+        // ended up with lights, every car stopped every eighty metres, queues on the short
+        // segments grew back past their own entrances, and the network locked solid -- two and a
+        // half thousand vehicles at a mean speed of 0.1 m/s that never moved again. Real cities
+        // signalise a small minority of their junctions, and this is why.
         for (RoadNode& node : nodes_)
-            node.signalised = node.incidentCount >= 3 &&
-                              static_cast<int>(node.highestClass) <= static_cast<int>(RoadClass::Collector);
+        {
+            int majorArms = 0;
+            for (std::uint16_t k = 0; k < node.incidentCount; ++k)
+            {
+                const RoadClass cls = segments_[incident_[node.firstIncident + k].segment].roadClass;
+                if (static_cast<int>(cls) <= static_cast<int>(RoadClass::Arterial)) ++majorArms;
+            }
+            // Three major arms, because a *straight* arterial passing through a junction already
+            // contributes two of them: asking for two signalised every place an arterial met a
+            // side street, which is nine hundred of the fourteen hundred junctions here. Three is
+            // the arterial-meets-arterial test -- a crossing gives four arms and a T gives three --
+            // and it is the difference between a car meeting a red every eighty metres and meeting
+            // one every four hundred.
+            node.signalised = node.incidentCount >= 3 && majorArms >= 3;
+        }
 
         BuildSpatialIndex();
         raw_.clear();
