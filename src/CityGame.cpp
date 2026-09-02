@@ -1068,7 +1068,16 @@ namespace CnaCity
         frameMs_ = ElapsedMs(frameWatch);
         smoothedFrameMs_ += (frameMs_ - smoothedFrameMs_) * 0.06f;
 
-        if (!options_.screenshotPath.empty() && !screenshotTaken_ && frameCount_ > 8)
+        // The capture waits for the frame the caller asked for, not for the first one that has a
+        // picture in it. Taking it at frame nine was the first version, and every screenshot in
+        // the project was therefore of a city nine frames old -- one that had had a fraction of a
+        // simulated second to get anybody out of the house, which made every population figure on
+        // them meaningless.
+        // One frame before the limit, because Update's own frame-limit check calls Exit() and the
+        // harness then never reaches Draw for that frame -- so asking for the capture on exactly
+        // the last frame produces no file at all.
+        const int captureFrame = options_.frameLimit > 0 ? std::max(1, options_.frameLimit - 1) : 12;
+        if (!options_.screenshotPath.empty() && !screenshotTaken_ && frameCount_ >= captureFrame)
         {
             SaveScreenshot();
             screenshotTaken_ = true;

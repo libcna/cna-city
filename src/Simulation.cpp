@@ -426,6 +426,7 @@ namespace CnaCity
         wantsToLeave_.resize(count);
         wantsDestination_.resize(count);
         wantsActivity_.resize(count);
+        wantsFlag_.resize(count);
 
         // The stride cycles on the *decision pass* counter, not on the tick.
         //
@@ -476,6 +477,7 @@ namespace CnaCity
                             wantsToLeave_[slotIndex] = static_cast<std::uint32_t>(i);
                             wantsDestination_[slotIndex] = destination;
                             wantsActivity_[slotIndex] = static_cast<std::uint8_t>(next);
+                            wantsFlag_[slotIndex] = 0;
                             agents_.waitTimer[i] = 0.01f;
                         }
                         continue;
@@ -569,9 +571,17 @@ namespace CnaCity
                 wantsToLeave_[slot] = static_cast<std::uint32_t>(i);
                 wantsDestination_[slot] = destination;
                 wantsActivity_[slot] = static_cast<std::uint8_t>(next);
-                agents_.flags[i] |= setFlag;
-                // Claimed immediately so the agent is not re-offered on the next tick while it is
-                // waiting in the planning queue.
+                // The "already done this today" bit is *not* set here.
+                //
+                // It used to be, and the consequence was the largest behavioural defect in the
+                // program. A decision pass offers an eighth of the population -- twelve and a half
+                // thousand people -- and plans a few hundred of them; every other candidate had
+                // its bit set anyway and was therefore permanently marked as having commuted. At
+                // half past eight in the morning ninety-nine thousand of a hundred thousand
+                // citizens were still at home and would stay there all day. The bit is now set
+                // where the trip is actually planned, and the rest are re-offered next pass.
+                wantsFlag_[slot] = setFlag;
+                // Claimed for this pass so the agent is not queued twice.
                 agents_.waitTimer[i] = 0.01f;
             }
         });
@@ -588,6 +598,7 @@ namespace CnaCity
             const std::uint32_t index = (planRotation_ + k) % wanted;
             const std::uint32_t agent = wantsToLeave_[index];
             agents_.waitTimer[agent] = 0.0f;
+            agents_.flags[agent] |= wantsFlag_[index];
             StartTrip(agent, wantsDestination_[index], static_cast<Activity>(wantsActivity_[index]));
         }
         for (std::uint32_t k = budget; k < wanted; ++k)

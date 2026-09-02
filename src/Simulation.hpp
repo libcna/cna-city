@@ -156,6 +156,7 @@ namespace CnaCity
         std::vector<std::uint32_t> wantsToLeave_;
         std::vector<std::uint32_t> wantsDestination_;
         std::vector<std::uint8_t> wantsActivity_;
+        std::vector<std::uint8_t> wantsFlag_;
         std::atomic<std::uint32_t> wantsCount_{0};
         std::uint32_t planRotation_ = 0;
         int lastDayReset_ = -1;
