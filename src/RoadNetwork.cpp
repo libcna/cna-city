@@ -361,6 +361,10 @@ namespace CnaCity
             // deeper setback on the minor side of a corner block, which is what real corner blocks
             // look like anyway.
             const RoadProfile& profile = ProfileOf(frontage);
+            // No retry with a smaller inset here, unlike the buildable ring below. A kerb line
+            // inset by less than the carriageway's half-width is a footway drawn *on the road*,
+            // and a block too thin for its own kerb is better off with no raised footway at all.
+            block.kerb = InsetPolygon(block.outline, profile.carriagewayHalfWidth);
             const float inset = profile.carriagewayHalfWidth + profile.sidewalkWidth + sidewalkExtra;
             // A sliver block -- the triangles a diagonal avenue cuts out of a grid -- collapses
             // under the full setback, and rejecting it outright leaves a visible hole in the

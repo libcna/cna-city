@@ -60,6 +60,14 @@ add_executable(cna-city
     src/Agents.cpp
     src/Traffic.cpp
     src/Simulation.cpp
+    src/MeshBuilder.cpp
+    src/Materials.cpp
+    src/CityGeometry.cpp
+    src/InstanceRenderer.cpp
+    src/TextRenderer.cpp
+    src/CliOptions.cpp
+    src/CityGame.cpp
+    src/Benchmark.cpp
 )
 
 target_include_directories(cna-city PRIVATE src)

@@ -84,6 +84,10 @@ namespace CnaCity
     struct CityBlock
     {
         std::vector<Vec2> outline;   ///< Counter-clockwise, on the road centrelines.
+        /// The outline inset to the kerb line. Everything between this and @ref buildable is
+        /// footway, and drawing *this* polygon rather than a ribbon per street is what stops the
+        /// gaps at junctions and setbacks that a ribbon-only city shows as grass in the road.
+        std::vector<Vec2> kerb;
         std::vector<Vec2> buildable; ///< The outline inset past pavements and setback; may be empty.
         Vec2 centroid{0.0f, 0.0f};
         float area = 0.0f;           ///< Of @ref buildable, in m^2.

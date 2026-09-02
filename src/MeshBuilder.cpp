@@ -99,10 +99,21 @@ namespace CnaCity
         const auto base = static_cast<std::uint32_t>(vertices.size());
         const Vector3 normal(0.0f, 1.0f, 0.0f);
         const Vector4 tangent = TangentFor(normal, Vector3(dir.X, 0.0f, dir.Y));
-        vertices.emplace_back(ToWorld(from - side, y), normal, tangent, Vector2(uStart, vMin));
+        // The ring runs +side, -side, so that its winding matches every other upward-facing
+        // surface in this file. It used to run the other way, and the consequence was not subtle:
+        // every carriageway in the city was back-facing and therefore invisible, and what showed
+        // through instead was the ground plane -- a strip of grass down the middle of every
+        // street, with the lamp posts and the street trees correctly placed on either side of it.
+        //
+        // The convention is worth writing down because it is not the one the vertex normal
+        // suggests. Under this renderer's default rasterizer state a triangle is drawn when its
+        // right-hand-rule winding normal points *away* from the camera, so an upward-facing ground
+        // quad must be wound clockwise as seen from above -- the opposite of what "counter-
+        // clockwise is front-facing" would lead you to write.
         vertices.emplace_back(ToWorld(from + side, y), normal, tangent, Vector2(uStart, vMax));
-        vertices.emplace_back(ToWorld(to + side, y), normal, tangent, Vector2(uEnd, vMax));
+        vertices.emplace_back(ToWorld(from - side, y), normal, tangent, Vector2(uStart, vMin));
         vertices.emplace_back(ToWorld(to - side, y), normal, tangent, Vector2(uEnd, vMin));
+        vertices.emplace_back(ToWorld(to + side, y), normal, tangent, Vector2(uEnd, vMax));
         indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
     }
 
