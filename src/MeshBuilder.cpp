@@ -54,7 +54,8 @@ namespace CnaCity
     }
 
     void MeshData::AddBox(Vec2 center, float baseY, Vec2 halfExtent, float height, float rotation,
-                          Vec2 uvScaleSides, Vec2 uvOriginSides, bool includeTop, Vec2 topUvScale)
+                          Vec2 uvScaleSides, Vec2 uvOriginSides, bool includeTop, Vec2 topUvScale,
+                          bool includeBottom)
     {
         const Vec2 axisU = FromHeading(rotation);
         const Vec2 axisV = Perp(axisU);
@@ -87,6 +88,15 @@ namespace CnaCity
         if (includeTop)
             AddQuad(ToWorld(corner[3], top), ToWorld(corner[2], top), ToWorld(corner[1], top),
                     ToWorld(corner[0], top), Vector3(0.0f, 1.0f, 0.0f), Vec2(0.0f, 0.0f),
+                    Vec2(topUvScale.X, topUvScale.Y));
+
+        // A floor, off by default. Every building in the city stands on the ground, where a
+        // missing underside is invisible and 40 000 wasted triangles are not. A car body starts a
+        // third of a metre above the road, and without this you can see up into it from any camera
+        // low enough to be interesting.
+        if (includeBottom)
+            AddQuad(ToWorld(corner[0], baseY), ToWorld(corner[1], baseY), ToWorld(corner[2], baseY),
+                    ToWorld(corner[3], baseY), Vector3(0.0f, -1.0f, 0.0f), Vec2(0.0f, 0.0f),
                     Vec2(topUvScale.X, topUvScale.Y));
     }
 

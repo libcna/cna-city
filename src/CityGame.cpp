@@ -473,11 +473,13 @@ namespace CnaCity
                             static_cast<std::uint32_t>(&node - nodes.data()))[0];
                         const Vec2 along = FromHeading(arm.heading);
                         const RoadProfile& profile = ProfileOf(node.highestClass);
-                        spot = spot + along * 14.0f +
-                               Perp(along) * (profile.carriagewayHalfWidth + 1.6f);
+                        // Well back from the kerb: at a metre and a half the nearest parked car
+                        // fills a third of the frame and the street behind it is invisible.
+                        spot = spot + along * 26.0f +
+                               Perp(along) * (profile.carriagewayHalfWidth + 4.2f);
                     }
                 }
-                camera_.position = ToWorld(spot, 1.75f);
+                camera_.position = ToWorld(spot, 2.35f);
                 camera_.yaw += dt * 0.055f;
                 camera_.pitch = -0.045f;
                 break;

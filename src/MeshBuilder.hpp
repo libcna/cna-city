@@ -54,7 +54,8 @@ namespace CnaCity
          *        every building's windows the same physical size regardless of how big it is.
          */
         void AddBox(Vec2 center, float baseY, Vec2 halfExtent, float height, float rotation,
-                    Vec2 uvScaleSides, Vec2 uvOriginSides, bool includeTop, Vec2 topUvScale);
+                    Vec2 uvScaleSides, Vec2 uvOriginSides, bool includeTop, Vec2 topUvScale,
+                    bool includeBottom = false);
 
         /** @brief A flat horizontal ribbon along a polyline segment: roads, pavements, markings. */
         void AddRibbon(Vec2 from, Vec2 to, float halfWidth, float y, float uStart, float uEnd,

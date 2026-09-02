@@ -158,7 +158,7 @@ namespace CnaCity
             const float bodyHeight = boxy ? profile.height - sill - 0.05f
                                           : (profile.height - sill) * 0.52f;
             mesh.AddBox(Vec2(0.0f, 0.0f), sill, Vec2(halfLength, halfWidth), bodyHeight, 0.0f,
-                        Vec2(1, 1), Vec2(0, 0), true, Vec2(1, 1));
+                        Vec2(1, 1), Vec2(0, 0), true, Vec2(1, 1), true);
             if (!boxy)
             {
                 // The greenhouse: set back from the nose, inset from the sides, and roughly as
@@ -166,8 +166,8 @@ namespace CnaCity
                 // brick at fifty metres, and the first version made it a third of the height,
                 // which is why the traffic read as a row of paving slabs.
                 const float roofHeight = profile.height - sill - bodyHeight;
-                mesh.AddBox(Vec2(-halfLength * 0.12f, 0.0f), sill + bodyHeight,
-                            Vec2(halfLength * 0.54f, halfWidth * 0.88f), roofHeight, 0.0f,
+                mesh.AddBox(Vec2(-halfLength * 0.06f, 0.0f), sill + bodyHeight,
+                            Vec2(halfLength * 0.60f, halfWidth * 0.90f), roofHeight, 0.0f,
                             Vec2(1, 1), Vec2(0, 0), true, Vec2(1, 1));
             }
             return mesh;
@@ -205,9 +205,9 @@ namespace CnaCity
             else
             {
                 const float roofHeight = profile.height - sill - bodyHeight;
-                mesh.AddBox(Vec2(-halfLength * 0.12f, 0.0f), sill + bodyHeight + roofHeight * 0.13f,
-                            Vec2(halfLength * 0.50f, halfWidth * 0.892f), roofHeight * 0.62f, 0.0f,
-                            Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));
+                mesh.AddBox(Vec2(-halfLength * 0.06f, 0.0f), sill + bodyHeight + roofHeight * 0.14f,
+                            Vec2(halfLength * 0.555f, halfWidth * 0.912f), roofHeight * 0.60f,
+                            0.0f, Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));
             }
 
             // Wheels: tucked under the sill and just inside the flanks, so they read as wheels in
@@ -219,7 +219,7 @@ namespace CnaCity
                     mesh.AddBox(Vec2(static_cast<float>(fx) * halfLength * 0.62f,
                                      static_cast<float>(fz) * (halfWidth - wheelWidth - 0.02f)),
                                 0.0f, Vec2(wheelRadius, wheelWidth), sill + 0.10f, 0.0f,
-                                Vec2(1, 1), Vec2(0, 0), true, Vec2(1, 1));
+                                Vec2(1, 1), Vec2(0, 0), true, Vec2(1, 1), true);
             return mesh;
         }
 
