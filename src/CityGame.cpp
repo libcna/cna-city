@@ -454,17 +454,32 @@ namespace CnaCity
 
             case CameraMode::Street:
             {
-                // Fixed on a pavement corner, panning slowly. Chosen once and then left alone: the
-                // whole point is that the city moves and the camera does not.
+                // Standing on a pavement corner at eye height, panning slowly. Chosen once and
+                // then left alone: the whole point of this mode is that the city moves and the
+                // camera does not.
+                //
+                // The offset off the junction matters. Parking the camera on the node itself puts
+                // it in the middle of a crossroads looking down at the tarmac from five metres up,
+                // which is the one place on a street where you can see least.
                 static Vec2 spot(0.0f, 0.0f);
                 if (LengthSq(spot) < 1e-6f && !sim_.city().roads().nodes().empty())
                 {
                     const auto& nodes = sim_.city().roads().nodes();
-                    spot = nodes[(nodes.size() * 7u / 13u) % nodes.size()].position;
+                    const RoadNode& node = nodes[(nodes.size() * 7u / 13u) % nodes.size()];
+                    spot = node.position;
+                    if (node.incidentCount > 0)
+                    {
+                        const Incidence& arm = sim_.city().roads().incidenceBegin(
+                            static_cast<std::uint32_t>(&node - nodes.data()))[0];
+                        const Vec2 along = FromHeading(arm.heading);
+                        const RoadProfile& profile = ProfileOf(node.highestClass);
+                        spot = spot + along * 14.0f +
+                               Perp(along) * (profile.carriagewayHalfWidth + 1.6f);
+                    }
                 }
-                camera_.position = ToWorld(spot, 5.2f);
+                camera_.position = ToWorld(spot, 1.75f);
                 camera_.yaw += dt * 0.055f;
-                camera_.pitch = -0.10f;
+                camera_.pitch = -0.045f;
                 break;
             }
 

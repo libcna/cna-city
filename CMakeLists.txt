@@ -29,6 +29,21 @@ set(CNA_SHARP_RUNTIME_ROOT
     "${CMAKE_CURRENT_SOURCE_DIR}/../sharp-runtimenext"
     CACHE PATH "sharp-runtimenext checkout used by cna-city")
 
+# Both are sibling checkouts rather than submodules, so `git submodule update --init` will not
+# fetch either. Saying so here costs one branch and saves whoever clones this a confusing wall of
+# "no such file" from deep inside CNA's own configure.
+foreach(_sibling
+        "${CMAKE_CURRENT_SOURCE_DIR}/../cnanext"
+        "${CNA_SHARP_RUNTIME_ROOT}")
+    if(NOT EXISTS "${_sibling}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "cna-city: missing sibling checkout at ${_sibling}.\n"
+            "  cna-city expects ../cnanext and ../sharp-runtimenext next to it -- they are "
+            "separate git checkouts, not submodules. Point elsewhere with "
+            "-DCNA_SHARP_RUNTIME_ROOT=<path>.")
+    endif()
+endforeach()
+
 # The CNAEXT engine layer is OFF by default in CNA. This demo exists to exercise it, so it is the
 # one consumer in the workspace that turns it on unconditionally rather than as an option.
 set(CNA_CNAEXT ON CACHE BOOL "Enable the CNAEXT extended graphics layer" FORCE)
