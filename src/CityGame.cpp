@@ -143,8 +143,12 @@ namespace CnaCity
                 settings.setSSAOEnabled(false);
                 settings.setLightShaftIntensity(0.45f);
                 settings.setLightShaftThreshold(0.78f);
-                settings.setChromaticAberrationStrength(0.25f);
-                settings.setFilmGrainIntensity(0.02f);
+                // Both of these are measured in screen widths, not in "a bit". A quarter of a
+                // screen width of chromatic aberration is not a lens artefact, it is three copies
+                // of the city offset from each other, which is exactly what the first ultra frame
+                // rendered.
+                settings.setChromaticAberrationStrength(0.0018f);
+                settings.setFilmGrainIntensity(0.015f);
                 break;
         }
     }
@@ -226,7 +230,6 @@ namespace CnaCity
         const float half = sim_.city().config().halfSize;
         camera_.position = Vector3(0.0f, half * 0.42f, half * 0.95f);
         camera_.LookAt(Vector3(0.0f, 40.0f, 0.0f));
-        followAgent_ = sim_.PickInterestingAgent(1u);
     }
 
     void CityGame::UnloadContent()
@@ -266,6 +269,7 @@ namespace CnaCity
         if (pressed(Keys::N))
         {
             followAgent_ = sim_.PickInterestingAgent(static_cast<std::uint32_t>(frameCount_));
+            followSnap_ = true;
             cameraMode_ = CameraMode::Follow;
         }
         if (pressed(Keys::F))
@@ -348,18 +352,72 @@ namespace CnaCity
             case CameraMode::Follow:
             {
                 if (followAgent_ == kNoIndex || followAgent_ >= sim_.agents().size())
+                {
+                    // Picked lazily rather than at load: the list of people currently outdoors is
+                    // built by the first simulation step, so asking before then reliably returned
+                    // somebody sitting indoors and the camera hung in the sky above them.
                     followAgent_ = sim_.PickInterestingAgent(static_cast<std::uint32_t>(frameCount_));
+                    followSnap_ = true;
+                }
                 if (followAgent_ == kNoIndex) break;
+
+                // A citizen who has gone indoors and stayed there is not worth watching, and this
+                // camera exists to watch somebody's day rather than their front door. After a few
+                // seconds of nothing happening it moves on -- which is also what stops the mode
+                // from opening on a wall, because the first person it is handed is as likely to be
+                // asleep as on their way to work.
+                const auto currentMode = static_cast<Mode>(sim_.agents().mode[followAgent_]);
+                followIdleSeconds_ = currentMode == Mode::Indoors ? followIdleSeconds_ + dt : 0.0f;
+                if (followIdleSeconds_ > 2.5f)
+                {
+                    followAgent_ = sim_.PickInterestingAgent(
+                        static_cast<std::uint32_t>(frameCount_ * 7 + 13));
+                    followIdleSeconds_ = 0.0f;
+                    followSnap_ = true;
+                    if (followAgent_ == kNoIndex) break;
+                }
+
                 const Vector3 subject = sim_.AgentWorldPosition(followAgent_);
                 const auto mode = static_cast<Mode>(sim_.agents().mode[followAgent_]);
                 // Behind and above the shoulder, and closer when the subject is on foot than when
                 // they are in a car or on a train.
-                const float distance = mode == Mode::Walking ? 6.5f : 13.0f;
-                const float height = mode == Mode::Walking ? 2.6f : 4.6f;
-                const float heading = sim_.agents().heading[followAgent_];
-                const Vector3 wanted(subject.X - std::cos(heading) * distance, subject.Y + height,
-                                     subject.Z - std::sin(heading) * distance);
-                camera_.EaseTo(wanted, dt, mode == Mode::Indoors ? 0.9f : 0.28f);
+                const float distance = mode == Mode::Walking ? 6.5f
+                                     : mode == Mode::Indoors ? 11.0f
+                                                             : 13.0f;
+                const float height = mode == Mode::Walking ? 2.6f
+                                   : mode == Mode::Indoors ? 6.0f
+                                                           : 4.6f;
+                // Indoors the subject's heading is stale, so the camera swings off the doorway's
+                // own axis instead: standing behind a citizen who is not facing anywhere puts the
+                // lens inside the building they just walked into.
+                const float heading = mode == Mode::Indoors
+                                          ? sim_.agents().heading[followAgent_] + 2.2f
+                                          : sim_.agents().heading[followAgent_];
+                Vector3 wanted(subject.X - std::cos(heading) * distance, subject.Y + height,
+                               subject.Z - std::sin(heading) * distance);
+
+                // Pull the camera out of whatever it is standing in. A pedestrian walks along a
+                // pavement with a building right behind them, so a chase camera at a fixed
+                // distance is inside that building about half the time; the fix is to walk the
+                // offset back toward the subject and, failing that, to rise above the roof.
+                for (int step = 0; step < 6; ++step)
+                {
+                    const float roof = sim_.city().BuildingHeightAt(ToGround(wanted));
+                    if (roof < wanted.Y - 0.4f) break;
+                    const float shrink = 1.0f - 0.20f * static_cast<float>(step + 1);
+                    wanted = Vector3(subject.X + (wanted.X - subject.X) * shrink,
+                                     subject.Y + height + static_cast<float>(step) * 1.6f,
+                                     subject.Z + (wanted.Z - subject.Z) * shrink);
+                }
+                if (followSnap_)
+                {
+                    camera_.position = wanted;
+                    followSnap_ = false;
+                }
+                else
+                {
+                    camera_.EaseTo(wanted, dt, mode == Mode::Indoors ? 0.9f : 0.28f);
+                }
                 camera_.LookAt(Vector3(subject.X, subject.Y + 1.2f, subject.Z));
                 break;
             }
@@ -440,7 +498,7 @@ namespace CnaCity
         // the ground is just readable.
         const Vector3 skyBlue(0.34f, 0.42f, 0.58f);
         const Vector3 sodium(0.0125f, 0.0084f, 0.0056f);
-        const float dayStrength = day * (0.052f + 0.085f * cloud);
+        const float dayStrength = day * (0.088f + 0.115f * cloud);
         return Vector3(skyBlue.X * dayStrength + sodium.X * night,
                        skyBlue.Y * dayStrength + sodium.Y * night,
                        skyBlue.Z * dayStrength + sodium.Z * night);
@@ -544,7 +602,6 @@ namespace CnaCity
         ++frameCount_;
 
         HandleInput(clamped);
-        UpdateCamera(clamped);
 
         System::Diagnostics::Stopwatch watch;
         watch.Start();
@@ -558,6 +615,12 @@ namespace CnaCity
         }
         watch.Stop();
         simMs_ = ElapsedMs(watch);
+
+        // The camera moves *after* the world does. The other order costs one step of lag, which
+        // for a free camera is invisible and for the follow camera is not: at sixty times real
+        // time the subject covers a metre between the aim and the frame, and at six metres'
+        // distance that is enough to walk them out of shot.
+        UpdateCamera(clamped);
 
         if (options_.frameLimit > 0 && frameCount_ >= options_.frameLimit) Exit();
         Game::Update(gameTime);
@@ -664,6 +727,46 @@ namespace CnaCity
                                  PersonTransform(position, agents.heading[agent],
                                                  agents.animationPhase[agent], agents.speed[agent]));
             ++drawnPeople_;
+        }
+
+        // Precipitation, as a column of particles that travels with the camera.
+        //
+        // Rain over a three-kilometre city is not simulated -- there is no useful sense in which
+        // the drop that lands two kilometres away matters -- so a fixed budget of particles is
+        // kept in a box around the viewer and wrapped as it falls. The count follows the weather,
+        // so a shower builds and eases rather than switching on.
+        const float precipitation = sim_.weather().precipitation();
+        if (precipitation > 0.02f)
+        {
+            const bool snow = sim_.weather().temperatureC() < 0.5f;
+            const int count = static_cast<int>(precipitation * (snow ? 1400.0f : 2600.0f));
+            const float boxHalf = snow ? 26.0f : 34.0f;
+            const float boxHeight = snow ? 22.0f : 30.0f;
+            const float fallSpeed = snow ? 1.3f : 9.5f;
+            const float wind = sim_.weather().windSpeed();
+            const Vec2 windDir = FromHeading(sim_.weather().windDirection());
+            const float time = static_cast<float>(frameCount_) * 0.016f;
+            for (int i = 0; i < count; ++i)
+            {
+                const std::uint32_t bits = static_cast<std::uint32_t>(i) * 2654435761u;
+                const float fx = static_cast<float>(bits & 1023u) / 1023.0f;
+                const float fz = static_cast<float>((bits >> 10) & 1023u) / 1023.0f;
+                const float fy = static_cast<float>((bits >> 20) & 1023u) / 1023.0f;
+                const float fall = std::fmod(time * fallSpeed + fy * boxHeight, boxHeight);
+                const float height = boxHeight - fall;
+                // A snowflake wanders; a raindrop does not. One sine each is enough to tell them
+                // apart at a glance, which is the whole job.
+                const float wobble = snow ? std::sin(time * 1.7f + fy * 31.0f) * 0.9f : 0.0f;
+                const Vec2 at(eye.X + (fx * 2.0f - 1.0f) * boxHalf + windDir.X * fall * wind * 0.05f + wobble,
+                              eye.Z + (fz * 2.0f - 1.0f) * boxHalf + windDir.Y * fall * wind * 0.05f);
+                if (height < 0.05f) continue;
+                // Rain leans into the wind; the lean is the difference between rain and a
+                // curtain of hanging sticks.
+                const float lean = snow ? 0.0f : Clamp(wind * 0.045f, 0.0f, 0.55f);
+                instances_.AddPrecipitation(
+                    snow, Matrix::CreateRotationZ(lean) *
+                              Matrix::CreateTranslation(at.X, height, at.Y));
+            }
         }
 
         // Trains, three cars each, only when the camera is underground or close enough that the

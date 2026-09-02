@@ -70,6 +70,8 @@ namespace CnaCity
         void AddPerson(PersonLod lod, std::uint8_t phase, std::uint8_t colorBucket,
                        const Microsoft::Xna::Framework::Matrix& world);
         void AddTrain(const Microsoft::Xna::Framework::Matrix& world);
+        /** @param snow False for a rain streak, true for a snowflake. */
+        void AddPrecipitation(bool snow, const Microsoft::Xna::Framework::Matrix& world);
 
         /**
          * @brief Uploads and draws every non-empty batch.
@@ -103,6 +105,8 @@ namespace CnaCity
         std::size_t vehicleGlass_[kVehicleKindCount] = {};
         std::size_t personBatch_[3][kWalkPhases][kColorBuckets] = {};
         std::size_t trainBatch_ = 0;
+        std::size_t rainBatch_ = 0;
+        std::size_t snowBatch_ = 0;
         bool instancingSupported_ = false;
         std::string diagnostic_;
     };

@@ -95,6 +95,8 @@ namespace CnaCity
         CameraMode cameraMode_ = CameraMode::Orbit;
         Overlay overlay_ = Overlay::Statistics;
         std::uint32_t followAgent_ = kNoIndex;
+        bool followSnap_ = true;
+        float followIdleSeconds_ = 0.0f;
         float orbitAngle_ = 0.0f;
         float cinematicTime_ = 0.0f;
         float freeSpeed_ = 60.0f;

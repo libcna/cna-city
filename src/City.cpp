@@ -134,6 +134,8 @@ namespace CnaCity
 
         Rng propRng = root.Split(StreamProps);
         GenerateProps(propRng);
+
+        BuildOccupancy();
     }
 
     void City::GenerateDistricts(Rng& rng)
@@ -313,6 +315,11 @@ namespace CnaCity
                               roads_.nodes()[segment.nodeB].position) * 0.5f;
             segment.district = DistrictAt(mid);
         }
+    }
+
+    int City::CellIndex(float world) const
+    {
+        return static_cast<int>(std::floor((world + config_.halfSize + 60.0f) / kOccupancyCell));
     }
 
     std::uint16_t City::DistrictAt(Vec2 point) const
@@ -674,6 +681,51 @@ namespace CnaCity
                 building.residents = 0;
                 break;
         }
+    }
+
+    void City::BuildOccupancy()
+    {
+        const float span = config_.halfSize * 2.0f + 120.0f;
+        occupancySide_ = std::max(1, static_cast<int>(span / kOccupancyCell) + 1);
+        occupancy_.assign(static_cast<std::size_t>(occupancySide_) * occupancySide_, 0);
+
+        // Each building stamps its own rotated footprint by walking the axis-aligned bound and
+        // testing the local coordinates. Rasterising the rotated rectangle exactly would be a
+        // scanline fill; at two metres per cell the difference is one cell of overdraw at the
+        // corners, and a camera pushed one cell further out of a wall is not a defect.
+        for (const Building& building : buildings_)
+        {
+            const Vec2 axisU = FromHeading(building.rotation);
+            const Vec2 axisV = Perp(axisU);
+            const float reach = Length(building.halfExtent) + kOccupancyCell;
+            const auto height = static_cast<std::uint8_t>(
+                Clamp(static_cast<int>(building.height * 2.0f), 1, 255));
+            const int x0 = CellIndex(building.center.X - reach);
+            const int x1 = CellIndex(building.center.X + reach);
+            const int y0 = CellIndex(building.center.Y - reach);
+            const int y1 = CellIndex(building.center.Y + reach);
+            for (int y = y0; y <= y1; ++y)
+                for (int x = x0; x <= x1; ++x)
+                {
+                    if (x < 0 || y < 0 || x >= occupancySide_ || y >= occupancySide_) continue;
+                    const Vec2 at(-config_.halfSize - 60.0f + (static_cast<float>(x) + 0.5f) * kOccupancyCell,
+                                  -config_.halfSize - 60.0f + (static_cast<float>(y) + 0.5f) * kOccupancyCell);
+                    const Vec2 local = at - building.center;
+                    if (std::fabs(Dot(local, axisU)) > building.halfExtent.X + 0.6f) continue;
+                    if (std::fabs(Dot(local, axisV)) > building.halfExtent.Y + 0.6f) continue;
+                    std::uint8_t& cell = occupancy_[static_cast<std::size_t>(y) * occupancySide_ + x];
+                    if (height > cell) cell = height;
+                }
+        }
+    }
+
+    float City::BuildingHeightAt(Vec2 point) const
+    {
+        if (occupancy_.empty()) return 0.0f;
+        const int x = CellIndex(point.X);
+        const int y = CellIndex(point.Y);
+        if (x < 0 || y < 0 || x >= occupancySide_ || y >= occupancySide_) return 0.0f;
+        return static_cast<float>(occupancy_[static_cast<std::size_t>(y) * occupancySide_ + x]) * 0.5f;
     }
 
     void City::GenerateProps(Rng& rng)

@@ -86,14 +86,36 @@ off by default in CNA and this demo is the reason to switch it on.
 
 `--help` lists everything.
 
-## Why this exists
+## What it measures
 
 Every one of CNA's own examples isolates one subsystem so that a failure names itself. That is the
 right way to test a runtime and the wrong way to find out what it costs. This program does the
 opposite on purpose: it turns everything on at once, at a scale nothing else in the workspace
-reaches, and reports where the frame goes. What it finds is written down in
-[`ARCHITECTURE.md`](ARCHITECTURE.md) and in the benchmark section of that document, with the
-measurement beside every claim.
+reaches, and reports where the frame goes.
+
+On an AMD Radeon 780M with 16 threads, at a hundred thousand citizens:
+
+| | |
+|---|---|
+| City generation, from one seed | **24 ms** — 204 km of road, 1 072 blocks, 11 808 buildings |
+| Simulation tick, mean / p99 | **2.57 ms / 4.33 ms** |
+| Frame, street level, 1600x900 high | **12.4 ms (80 fps)** |
+| Frame, city overview, all four shadow cascades | **15.3 ms (65 fps)** |
+| Total resident memory | **under 65 MB** |
+
+**A hundred times the agents costs 8.9 times the tick, not a hundred.** The route cache's hit rate
+*rises* with population — 8% at a thousand agents, 38% at a hundred thousand — because citizens do
+not have random destinations, they go to the same few thousand doorways.
+
+And the bottleneck is not where a graphics demo would put it: from an overview at a hundred thousand
+agents the *simulation* costs more than the frame. The whole static city is 220 000 triangles.
+
+Two things CNA could not do here are written down as plainly as the things it could: thousands of
+street lights cannot be real lights while a surface also needs a texture set, and there is no vertex
+attribute slot left for a per-instance colour. Both, and every defect found on the way — including
+the four that produced a city where nobody ever arrived anywhere and the one that made every road
+in the city invisible — are in [`ARCHITECTURE.md`](ARCHITECTURE.md), with the measurement beside
+each claim.
 
 ## License
 

@@ -145,7 +145,7 @@ namespace CnaCity
             return mesh;
         }
 
-        /** @brief A vehicle body: bonnet, cabin base and boot, sized from the real profile. */
+        /** @brief A vehicle's painted shell: body, and a greenhouse on anything that is not a box. */
         MeshData BuildVehicleBody(VehicleKind kind)
         {
             const VehicleProfile& profile = ProfileOf(kind);
@@ -154,36 +154,33 @@ namespace CnaCity
             const float halfWidth = profile.width * 0.5f;
             const bool boxy = kind == VehicleKind::Bus || kind == VehicleKind::Truck ||
                               kind == VehicleKind::Van;
-            const float bodyHeight = boxy ? profile.height - 0.35f : profile.height * 0.55f;
-            mesh.AddBox(Vec2(0.0f, 0.0f), 0.32f, Vec2(halfLength, halfWidth), bodyHeight, 0.0f,
+            const float sill = 0.34f;                       // the underside, above the wheels
+            const float bodyHeight = boxy ? profile.height - sill - 0.05f
+                                          : (profile.height - sill) * 0.52f;
+            mesh.AddBox(Vec2(0.0f, 0.0f), sill, Vec2(halfLength, halfWidth), bodyHeight, 0.0f,
                         Vec2(1, 1), Vec2(0, 0), true, Vec2(1, 1));
             if (!boxy)
-                // The greenhouse, set back from the nose and inset from the sides. It is the one
-                // shape that separates a car from a brick at fifty metres.
-                mesh.AddBox(Vec2(-0.25f, 0.0f), 0.32f + bodyHeight - 0.02f,
-                            Vec2(halfLength * 0.52f, halfWidth * 0.86f),
-                            profile.height - bodyHeight - 0.30f, 0.0f, Vec2(1, 1), Vec2(0, 0), true,
-                            Vec2(1, 1));
-            // Wheels, as short cylinders lying on their sides. Four boxes would be cheaper and
-            // would look like four boxes.
-            const float wheelRadius = boxy ? 0.46f : 0.33f;
-            for (int fx = -1; fx <= 1; fx += 2)
-                for (int fz = -1; fz <= 1; fz += 2)
-                {
-                    MeshData wheel;
-                    wheel.AddCylinder(Vec2(0.0f, 0.0f), -wheelRadius, wheelRadius, wheelRadius * 2.0f,
-                                      8, Vec2(0, 0), Vec2(1, 1), true);
-                    // Rotated a quarter turn about Z is not something Append does, so the wheel is
-                    // simply a squat cylinder: at the size a wheel occupies on screen here, the
-                    // difference is under a pixel and it costs no extra vertex format.
-                    mesh.Append(wheel,
-                                Vector3(static_cast<float>(fx) * halfLength * 0.68f, wheelRadius,
-                                        static_cast<float>(fz) * halfWidth * 0.94f),
-                                0.0f, 0.55f);
-                }
+            {
+                // The greenhouse: set back from the nose, inset from the sides, and roughly as
+                // tall as the body under it. It is the one shape that separates a car from a
+                // brick at fifty metres, and the first version made it a third of the height,
+                // which is why the traffic read as a row of paving slabs.
+                const float roofHeight = profile.height - sill - bodyHeight;
+                mesh.AddBox(Vec2(-halfLength * 0.12f, 0.0f), sill + bodyHeight,
+                            Vec2(halfLength * 0.54f, halfWidth * 0.88f), roofHeight, 0.0f,
+                            Vec2(1, 1), Vec2(0, 0), true, Vec2(1, 1));
+            }
             return mesh;
         }
 
+        /**
+         * @brief A vehicle's dark parts: the glazing and the wheels.
+         *
+         * They share the body's instance matrices and are drawn once per vehicle kind rather than
+         * once per colour, because a wheel is black on every car ever made. Putting the wheels
+         * here rather than in the painted shell is not tidiness -- in the shell they came out
+         * body-coloured, which is a look no car has had since 1958.
+         */
         MeshData BuildVehicleGlass(VehicleKind kind)
         {
             const VehicleProfile& profile = ProfileOf(kind);
@@ -192,15 +189,37 @@ namespace CnaCity
                               kind == VehicleKind::Van;
             const float halfLength = profile.length * 0.5f;
             const float halfWidth = profile.width * 0.5f;
+            const float sill = 0.34f;
+            const float bodyHeight = boxy ? profile.height - sill - 0.05f
+                                          : (profile.height - sill) * 0.52f;
+
+            // A band of glazing, a centimetre proud of the shell so it wins the depth test
+            // cleanly. It has to be *inside* the painted volume in every other dimension: the
+            // first version made the car's glass wider and taller than the greenhouse it sits in,
+            // which swallowed the roof and left every car looking like a white slab with a black
+            // lid.
             if (boxy)
-                mesh.AddBox(Vec2(0.0f, 0.0f), profile.height * 0.42f,
-                            Vec2(halfLength * 0.97f, halfWidth * 1.005f), profile.height * 0.34f,
-                            0.0f, Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));
+                mesh.AddBox(Vec2(0.0f, 0.0f), sill + bodyHeight * 0.46f,
+                            Vec2(halfLength * 0.94f, halfWidth * 1.012f), bodyHeight * 0.34f, 0.0f,
+                            Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));
             else
-                mesh.AddBox(Vec2(-0.25f, 0.0f), 0.32f + profile.height * 0.55f,
-                            Vec2(halfLength * 0.50f, halfWidth * 0.88f),
-                            profile.height - profile.height * 0.55f - 0.34f, 0.0f, Vec2(1, 1),
-                            Vec2(0, 0), false, Vec2(1, 1));
+            {
+                const float roofHeight = profile.height - sill - bodyHeight;
+                mesh.AddBox(Vec2(-halfLength * 0.12f, 0.0f), sill + bodyHeight + roofHeight * 0.13f,
+                            Vec2(halfLength * 0.50f, halfWidth * 0.892f), roofHeight * 0.62f, 0.0f,
+                            Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));
+            }
+
+            // Wheels: tucked under the sill and just inside the flanks, so they read as wheels in
+            // arches rather than as blocks bolted to the outside.
+            const float wheelRadius = boxy ? 0.44f : 0.31f;
+            const float wheelWidth = boxy ? 0.15f : 0.10f;
+            for (int fx = -1; fx <= 1; fx += 2)
+                for (int fz = -1; fz <= 1; fz += 2)
+                    mesh.AddBox(Vec2(static_cast<float>(fx) * halfLength * 0.62f,
+                                     static_cast<float>(fz) * (halfWidth - wheelWidth - 0.02f)),
+                                0.0f, Vec2(wheelRadius, wheelWidth), sill + 0.10f, 0.0f,
+                                Vec2(1, 1), Vec2(0, 0), true, Vec2(1, 1));
             return mesh;
         }
 
@@ -253,6 +272,25 @@ namespace CnaCity
                 mesh.AddBox(Vec2(-direction * 0.17f, static_cast<float>(side) * 0.20f), 0.86f,
                             Vec2(0.055f, 0.052f), 0.50f, 0.0f, Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));
             }
+            return mesh;
+        }
+
+        /// A falling raindrop, as a short vertical streak. A drop drawn as a point is invisible;
+        /// what the eye actually reads as rain is the motion blur of one, and a 40 cm streak is
+        /// that blur made geometry.
+        MeshData BuildRainStreak()
+        {
+            MeshData mesh;
+            mesh.AddBox(Vec2(0.0f, 0.0f), 0.0f, Vec2(0.011f, 0.011f), 0.42f, 0.0f, Vec2(1, 1),
+                        Vec2(0, 0), true, Vec2(1, 1));
+            return mesh;
+        }
+
+        MeshData BuildSnowFlake()
+        {
+            MeshData mesh;
+            mesh.AddBox(Vec2(0.0f, 0.0f), 0.0f, Vec2(0.035f, 0.035f), 0.07f, 0.0f, Vec2(1, 1),
+                        Vec2(0, 0), true, Vec2(1, 1));
             return mesh;
         }
 
@@ -351,6 +389,12 @@ namespace CnaCity
 
         trainBatch_ = AddBatch(device, BuildTrainCar(), CityMaterial::StreetFurniture,
                                Vector3(0.72f, 0.74f, 0.78f), false);
+        // Precipitation is emissive so it stays visible against a dark wet street at night, which
+        // is exactly the frame it matters most in.
+        rainBatch_ = AddBatch(device, BuildRainStreak(), CityMaterial::VehicleGlass,
+                              Vector3(0.62f, 0.70f, 0.86f), true);
+        snowBatch_ = AddBatch(device, BuildSnowFlake(), CityMaterial::Person,
+                              Vector3(0.94f, 0.96f, 1.0f), true);
 
         if (!instancingSupported_)
             diagnostic_ = "hardware instancing unavailable on this renderer -- props, vehicles and "
@@ -387,6 +431,12 @@ namespace CnaCity
     void InstanceRenderer::AddTrain(const Matrix& world)
     {
         if (trainBatch_ < batches_.size()) batches_[trainBatch_].instances.push_back(world);
+    }
+
+    void InstanceRenderer::AddPrecipitation(bool snow, const Matrix& world)
+    {
+        const std::size_t index = snow ? snowBatch_ : rainBatch_;
+        if (index < batches_.size()) batches_[index].instances.push_back(world);
     }
 
     std::size_t InstanceRenderer::instanceCount() const

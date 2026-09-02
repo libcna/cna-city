@@ -1021,11 +1021,12 @@ namespace CnaCity
 
     std::uint32_t Simulation::PickInterestingAgent(std::uint32_t hint) const
     {
-        // Prefer somebody on foot: they are the ones whose day is visible from a chase camera.
-        if (!walking_.empty())
-            return walking_[Hash(hint, static_cast<std::uint32_t>(tick_)) % walking_.size()];
-        if (agents_.size() == 0) return kNoIndex;
-        return Hash(hint, 1u) % static_cast<std::uint32_t>(agents_.size());
+        // Somebody on foot, or nobody. Falling back to a uniformly random citizen was the first
+        // version and it is worse than useless: before the first tick the list of people outdoors
+        // is empty, so the follow camera's opening shot was reliably a random person asleep in a
+        // building, filmed from inside the wall.
+        if (walking_.empty()) return kNoIndex;
+        return walking_[Hash(hint, static_cast<std::uint32_t>(tick_)) % walking_.size()];
     }
 
     std::size_t Simulation::MemoryBytes() const

@@ -150,11 +150,23 @@ namespace CnaCity
 
         [[nodiscard]] int districtGridSide() const { return districtSide_; }
 
+        /**
+         * @brief The height of the tallest building covering @p point, or 0 where there is none.
+         *
+         * A coarse occupancy grid, two metres to a cell and one byte to a height. It exists for
+         * the cameras: a chase camera placed a fixed distance behind a pedestrian walking along a
+         * pavement is inside the building behind them about half the time, and the alternative to
+         * this is a camera that spends its life looking at brickwork from within.
+         */
+        [[nodiscard]] float BuildingHeightAt(Vec2 point) const;
+
     private:
         void GenerateDistricts(Rng& rng);
         void GenerateRoads(Rng& rng);
         void GenerateBuildings(Rng& rng);
         void GenerateProps(Rng& rng);
+        void BuildOccupancy();
+        [[nodiscard]] int CellIndex(float world) const;
         void AssignDistrictsToNetwork();
         void PlaceBlockBuildings(std::uint32_t blockIndex, Rng& rng);
         void PlacePerimeterBuildings(const CityBlock& block, std::uint32_t blockIndex,
@@ -187,5 +199,10 @@ namespace CnaCity
         std::vector<float> gridX_;
         std::vector<float> gridZ_;
         int districtSide_ = 0;
+
+        /// Two metres per cell, one byte per cell holding the height in half-metre steps.
+        std::vector<std::uint8_t> occupancy_;
+        int occupancySide_ = 0;
+        static constexpr float kOccupancyCell = 2.0f;
     };
 }
