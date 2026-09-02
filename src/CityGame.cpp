@@ -139,8 +139,8 @@ namespace CnaCity
                 // entirely. A quarter is the middle of the usable band.
                 settings.setSSAORadius(0.24f);
                 settings.setSSAOIntensity(0.70f);
-                settings.setLightShaftIntensity(0.35f);
                 settings.setLightShaftThreshold(0.82f);
+                settings.setLensFlareIntensity(0.0f);
                 break;
             case Quality::Ultra:
                 settings.setRenderQuality(RenderQuality::Ultra);
@@ -154,8 +154,9 @@ namespace CnaCity
                 settings.setSSAORadius(0.24f);
                 settings.setSSAOIntensity(0.85f);
                 settings.setSSAOSampleCount(16);
-                settings.setLightShaftIntensity(0.45f);
                 settings.setLightShaftThreshold(0.78f);
+                settings.setLensFlareIntensity(0.12f);
+                settings.setLensFlareThreshold(1.15f);
                 // Both of these are measured in screen widths, not in "a bit". A quarter of a
                 // screen width of chromatic aberration is not a lens artefact, it is three copies
                 // of the city offset from each other, which is exactly what the first ultra frame
@@ -641,6 +642,16 @@ namespace CnaCity
             settings.setHeightFogFalloff(0.035f);
             settings.setHeightFogBaseHeight(2.0f);
             settings.setVolumetricFogDensity(sim_.weather().fogDensity() * 0.30f);
+            // God rays need a god. After sunset there is no bright source behind the rooflines for
+            // the radial blur to smear, and what it produces instead is a band of red and green
+            // fringing along every silhouette against the sky -- which is what the first night
+            // frames showed. The strength follows the sun, and above a heavy overcast it stops
+            // too, because that is also when there are no shafts to see.
+            const float shafts = options_.quality == Quality::Low      ? 0.0f
+                               : options_.quality == Quality::Ultra    ? 0.45f
+                                                                       : 0.32f;
+            settings.setLightShaftIntensity(shafts * day * day *
+                                            (1.0f - 0.85f * sim_.weather().cloudiness()));
             // A wet road at night is the strongest single effect available here, so the bloom
             // threshold drops after dark to let the lit windows and the lamps spill.
             settings.setBloomThreshold(Clamp(1.15f - 0.45f * (1.0f - day), 0.55f, 1.3f));
