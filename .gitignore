@@ -1,0 +1,35 @@
+# Build directories (see CLAUDE.md at the openeggbert workspace root: reuse these fixed
+# paths across sessions instead of creating throwaway ones).
+/build/
+/build-asan/
+/build-ubsan/
+/build-tsan/
+/build-probe/
+/build-consumer/
+/cmake-build-*/
+
+# Output written by `cna-city --bench` and `--screenshot`.
+/bench-results/
+/shots/
+*.png
+*.csv
+*.log
+
+# IDE / editor metadata.
+/.idea/
+/.vscode/
+*.swp
+
+# Compiler / tooling byproducts.
+compile_commands.json
+CMakeCache.txt
+CMakeFiles/
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+
+# OS cruft.
+.DS_Store
+Thumbs.db

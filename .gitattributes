@@ -1,0 +1,11 @@
+# Normalize line endings for source and text files; let Git handle the conversion.
+* text=auto eol=lf
+
+*.cpp text
+*.hpp text
+*.txt text
+*.md  text
+
+# Diff hints.
+*.cpp diff=cpp
+*.hpp diff=cpp
