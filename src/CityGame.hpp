@@ -67,6 +67,7 @@ namespace CnaCity
         void UpdateLighting();
         void CollectVisible();
         void DrawShadowCascades();
+        void DrawDepthNormalPrepass();
         void DrawStaticCity();
         void DrawSkyOverlay();
         void DrawOverlay();
@@ -90,6 +91,7 @@ namespace CnaCity
         std::unique_ptr<CNA::Graphics::CascadedShadowMap> shadows_;
         std::unique_ptr<CNA::Graphics::AtmosphericSky> sky_;
         std::unique_ptr<CNA::Graphics::DebugDraw> debug_;
+        std::unique_ptr<CNA::Graphics::DepthNormalPrepass> prepass_;
 
         Camera camera_;
         CameraMode cameraMode_ = CameraMode::Orbit;
@@ -119,6 +121,7 @@ namespace CnaCity
         double simMs_ = 0.0;
         double shadowMs_ = 0.0;
         double sceneMs_ = 0.0;
+        double prepassMs_ = 0.0;
         double instanceMs_ = 0.0;
         double smoothedFrameMs_ = 16.0;
         int drawCalls_ = 0;

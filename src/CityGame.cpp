@@ -10,6 +10,7 @@
 #include "CNA/Graphics/RenderQuality.hpp"
 #include "CNA/Graphics/ShadowQuality.hpp"
 #include "CNA/Graphics/TonemappingMode.hpp"
+#include "Microsoft/Xna/Framework/Graphics/ShaderEffect.hpp"
 #include "CNA/GraphicsCapability.hpp"
 #include "Microsoft/Xna/Framework/BoundingFrustum.hpp"
 #include "Microsoft/Xna/Framework/GameTime.hpp"
@@ -33,6 +34,7 @@ using namespace Microsoft::Xna::Framework::Input;
 using CNA::Graphics::AtmosphericSky;
 using CNA::Graphics::CascadedShadowMap;
 using CNA::Graphics::DebugDraw;
+using CNA::Graphics::DepthNormalPrepass;
 using CNA::Graphics::RenderPipeline;
 using CNA::Graphics::RenderQuality;
 using CNA::Graphics::ShadowQuality;
@@ -129,7 +131,14 @@ namespace CnaCity
                 settings.setBloomThreshold(1.0f);
                 settings.setBloomIterations(5);
                 settings.setFXAAEnabled(true);
-                settings.setSSAOEnabled(false);
+                settings.setSSAOEnabled(true);
+                // The radius is a UV offset compared against normalised depths, not a world
+                // distance. The stock default of 0.5 applies half the frame as an offset, which
+                // darkens everything a little and is a global dimmer wearing occlusion's name;
+                // below about 0.15 the samples cannot clear the depth bias and the term vanishes
+                // entirely. A quarter is the middle of the usable band.
+                settings.setSSAORadius(0.24f);
+                settings.setSSAOIntensity(0.70f);
                 settings.setLightShaftIntensity(0.35f);
                 settings.setLightShaftThreshold(0.82f);
                 break;
@@ -141,7 +150,10 @@ namespace CnaCity
                 settings.setBloomThreshold(0.95f);
                 settings.setBloomIterations(6);
                 settings.setFXAAEnabled(true);
-                settings.setSSAOEnabled(false);
+                settings.setSSAOEnabled(true);
+                settings.setSSAORadius(0.24f);
+                settings.setSSAOIntensity(0.85f);
+                settings.setSSAOSampleCount(16);
                 settings.setLightShaftIntensity(0.45f);
                 settings.setLightShaftThreshold(0.78f);
                 // Both of these are measured in screen widths, not in "a bit". A quarter of a
@@ -215,6 +227,22 @@ namespace CnaCity
             diagnostic_ = "this renderer does not sample shadow maps";
         }
 
+        // The depth/normal prepass SSAO reads. It is a *contract*, not a switch: the pass has to
+        // be filled by the game, with the prepass's own effect, before the pipeline is begun.
+        if (pipeline_->getSettings().isSSAOEnabled())
+        {
+            prepass_ = std::make_unique<DepthNormalPrepass>(
+                device, device.getViewportProperty().getWidthProperty(),
+                device.getViewportProperty().getHeightProperty());
+            if (!prepass_->isSupported(device))
+            {
+                prepass_.reset();
+                pipeline_->getSettings().setSSAOEnabled(false);
+                if (diagnostic_.empty())
+                    diagnostic_ = "no depth/normal prepass on this renderer -- ambient occlusion off";
+            }
+        }
+
         sky_ = std::make_unique<AtmosphericSky>(device);
         if (!sky_->isSupported())
         {
@@ -236,6 +264,7 @@ namespace CnaCity
     void CityGame::UnloadContent()
     {
         debug_.reset();
+        prepass_.reset();
         sky_.reset();
         shadows_.reset();
         pipeline_.reset();
@@ -825,6 +854,45 @@ namespace CnaCity
         shadowMs_ = ElapsedMs(watch);
     }
 
+    void CityGame::DrawDepthNormalPrepass()
+    {
+        if (prepass_ == nullptr || pipeline_ == nullptr) return;
+        if (!pipeline_->getSettings().isSSAOEnabled()) return;
+        ShaderEffect* effect = prepass_->getPrepassEffect();
+        if (effect == nullptr || !effect->IsEffectValid()) return;
+
+        GraphicsDevice& device = getGraphicsDeviceProperty();
+        System::Diagnostics::Stopwatch watch;
+        watch.Start();
+
+        const Matrix view = camera_.View();
+        const Matrix projection = camera_.Projection();
+        for (int pass = 0; pass < prepass_->getPassCount(); ++pass)
+        {
+            prepass_->begin(pass, view, projection, camera_.nearPlane, camera_.farPlane);
+            device.setRasterizerStateProperty(RasterizerState::CullCounterClockwise);
+            device.setDepthStencilStateProperty(DepthStencilState::Default);
+            device.setBlendStateProperty(BlendState::Opaque);
+            // `begin` selects the prepass program and sets its uniforms, so nothing below may call
+            // Apply on the scene's own effect: every such call would replace the program and the
+            // "depth" the pass records would end up being the shaded frame's red channel, which
+            // makes SSAO compare shading against shading and produce a weak, plausible dimming
+            // everywhere instead of occlusion at contacts.
+            effect->Apply();
+            for (std::uint32_t index : visibleChunks_)
+            {
+                const GeometryChunk& chunk = geometry_.chunks()[index];
+                for (int m = 0; m < kCityMaterialCount; ++m)
+                    if (chunk.meshes[m] != nullptr) chunk.meshes[m]->Draw(device);
+            }
+            prepass_->end();
+        }
+        pipeline_->setDepthNormalInputs(prepass_->getDepthTexture(), prepass_->getNormalTexture());
+
+        watch.Stop();
+        prepassMs_ = ElapsedMs(watch);
+    }
+
     void CityGame::DrawStaticCity()
     {
         GraphicsDevice& device = getGraphicsDeviceProperty();
@@ -1011,6 +1079,7 @@ namespace CnaCity
         UpdateLighting();
         CollectVisible();
         DrawShadowCascades();
+        DrawDepthNormalPrepass();
 
         const Matrix view = camera_.View();
         const Matrix projection = camera_.Projection();
@@ -1146,8 +1215,8 @@ namespace CnaCity
         add("");
         add("FRAME %.1f MS (%.0f FPS)", smoothedFrameMs_,
             smoothedFrameMs_ > 0.01 ? 1000.0 / smoothedFrameMs_ : 0.0);
-        add("  SIM %.1f  DRAW %.1f  (SHADOW %.1f SCENE %.1f INST %.1f)", simMs_, frameMs_,
-            shadowMs_, sceneMs_, instanceMs_);
+        add("  SIM %.1f  DRAW %.1f  (SHADOW %.1f PREPASS %.1f SCENE %.1f INST %.1f)", simMs_,
+            frameMs_, shadowMs_, prepassMs_, sceneMs_, instanceMs_);
         add("  SIM SPLIT  DECIDE %.1f WALK %.1f CROWD %.1f TRAFFIC %.1f METRO %.1f x%d",
             stats.decisionMs, stats.walkMs, stats.crowdMs, stats.trafficMs, stats.metroMs,
             stats.subSteps);

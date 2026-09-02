@@ -127,6 +127,14 @@ Four rendering defects are recorded in the source:
 - **Exposure.** It was raised after dark on the reasoning that night is dark. It is not: at night
   the *emitters* dominate, and lifting exposure blew the city to white.
 
+Ambient occlusion is a **contract rather than a switch**, and it is the clearest example of one in
+the layer: `RenderPipeline` will not produce it from a switch, because it needs a depth and a normal
+image that only the game can draw. `DepthNormalPrepass` is filled with a third pass over the visible
+chunks, using *its* effect and not the scene's -- calling the scene effect's `Apply` inside the
+prepass replaces the program, and the "depth" recorded is then the shaded frame's red channel, which
+makes SSAO compare shading against shading and produce a weak, plausible dimming everywhere instead
+of occlusion at contacts. It costs 0.9 ms at street level.
+
 The analytic sky is `AtmosphericSky`, which models a clear atmosphere and keeps producing sunset
 red below the horizon. Rather than replace it, cloud cover and night are painted over it as one
 blended sheet whose weights are both zero on a clear day.
@@ -197,9 +205,12 @@ foot, 1 900 driving at a mean 2.1 m/s with 177 of them queuing, and 550 on the u
 
 | view | frame | simulation | draw | shadows | scene | draws | triangles |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| city overview, 400 m up | 14.5 ms (69 fps) | 2.1 ms | 13.1 ms | 5.2 ms | 5.7 ms | 464 | 169 k |
-| chase camera on one citizen | 9.9 ms (101 fps) | 5.0 ms | 9.8 ms | 3.6 ms | 3.3 ms | 221 | 75 k |
-| street level | 8.6 ms (116 fps) | 3.1 ms | 5.6 ms | 1.5 ms | 1.5 ms | 157 | 32 k |
+| city overview, 400 m up | 13.4 ms (75 fps) | 2.3 ms | 11.8 ms | 5.0 ms | 5.2 ms | 460 | 168 k |
+| street level, morning rush | 9.4 ms (107 fps) | 3.8 ms | 7.8 ms | 2.1 ms | 2.2 ms | 153 | 32 k |
+| chase camera on one citizen | 6.9 ms (145 fps) | 1.2 ms | 4.4 ms | 1.1 ms | 1.2 ms | 141 | 20 k |
+| street level, night, in the rain | 9.1 ms (110 fps) | 2.4 ms | 7.3 ms | 2.2 ms | 2.1 ms | 148 | 32 k |
+
+Adding the SSAO prepass costs a further 0.9 ms at street level, for 88 fps rather than 107.
 
 The simulation and the draw are serial here, and which of them dominates depends entirely on where
 the camera is: from four hundred metres up the four shadow cascades and the visible chunk count put
