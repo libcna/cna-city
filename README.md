@@ -59,6 +59,11 @@ Instanced everything, culled and LOD-selected on the CPU, drawn through the `CNA
 | `4` | Street level — a fixed camera on a pavement corner, watching the city go past. |
 | `5` | Cinematic — a slow scripted sweep, for capture. |
 
+`Tab` cycles the overlay — off, statistics, the road graph the planner actually sees, and the live
+routes of the citizens near the camera. `F` cycles the weather, `T`/`G` wind the clock, `N` picks
+another citizen to follow, `[`/`]` change the time scale, `F1` hides the HUD and `F2` bypasses the
+whole post-processing chain so you can see what it is doing.
+
 ## Build
 
 ```sh

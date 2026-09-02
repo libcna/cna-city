@@ -127,7 +127,7 @@ namespace CnaCity
         void StepWalking(float dt);
         void StepMetroPassengers(float dt);
         void RebuildCrowdGrid();
-        void CollectModeLists();
+        void CollectModeLists(bool withActivityHistogram);
         [[nodiscard]] Vec2 SidewalkPoint(std::uint32_t fromNode, std::uint32_t toNode,
                                          float alongMetres, bool atEnd) const;
         [[nodiscard]] std::uint32_t DoorNodeOf(std::uint32_t building) const;
@@ -144,6 +144,8 @@ namespace CnaCity
         JobSystem jobs_;
         SimStats stats_;
         std::uint64_t tick_ = 0;
+        float decisionAccumulator_ = 0.0f;
+        std::uint32_t decisionPass_ = 0;
 
         std::vector<std::uint32_t> walking_;
         std::vector<std::uint32_t> waiting_;

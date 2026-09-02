@@ -77,6 +77,7 @@ namespace CnaCity
         setIsFixedTimeStepProperty(false);
         setIsMouseVisibleProperty(true);
         cameraMode_ = options_.camera;
+        overlay_ = static_cast<Overlay>(Clamp(options_.overlay, 0, static_cast<int>(Overlay::Count) - 1));
     }
 
     CityGame::~CityGame() = default;
@@ -927,9 +928,10 @@ namespace CnaCity
     void CityGame::DrawOverlay()
     {
         if (debug_ == nullptr || overlay_ == Overlay::None || overlay_ == Overlay::Statistics) return;
-        const Matrix view = camera_.View();
-        const Matrix projection = camera_.Projection();
-        debug_->clear();
+        // `begin` opens the batch and forgets the last one, so the shapes have to be submitted
+        // *between* begin and end. Submitting them first and calling begin afterwards -- which is
+        // how a SpriteBatch-shaped API reads -- draws nothing at all, silently.
+        debug_->begin(camera_.View(), camera_.Projection());
         debug_->setDepthTested(false);
 
         if (overlay_ == Overlay::RoadNetwork)
@@ -986,13 +988,19 @@ namespace CnaCity
             }
         }
 
-        debug_->begin(view, projection);
         debug_->end();
     }
 
     void CityGame::Draw(const GameTime& gameTime)
     {
-        (void)gameTime;
+        // The frame time is the *whole* frame, taken from the harness. Timing only the body of
+        // Draw was the first version, and it reported 65 fps for a frame that also spent fifteen
+        // milliseconds in Update -- half the real rate. A demo built to measure something must not
+        // be the thing that is measured wrongly.
+        const double elapsed =
+            gameTime.getElapsedGameTimeProperty().getTotalSecondsProperty() * 1000.0;
+        if (elapsed > 0.0 && elapsed < 500.0)
+            smoothedFrameMs_ += (elapsed - smoothedFrameMs_) * 0.06;
         GraphicsDevice& device = getGraphicsDeviceProperty();
         System::Diagnostics::Stopwatch frameWatch;
         frameWatch.Start();
@@ -1127,9 +1135,13 @@ namespace CnaCity
         add("METRO %zu TRAINS  %u RIDING  %u WAITING", sim_.metro().trains().size(), stats.riding,
             stats.waitingTrain);
         add("");
-        add("FRAME %.1f MS (%.0f FPS)  SIM %.1f MS", smoothedFrameMs_,
-            smoothedFrameMs_ > 0.01 ? 1000.0 / smoothedFrameMs_ : 0.0, simMs_);
-        add("  SHADOW %.1f  SCENE %.1f  INSTANCED %.1f", shadowMs_, sceneMs_, instanceMs_);
+        add("FRAME %.1f MS (%.0f FPS)", smoothedFrameMs_,
+            smoothedFrameMs_ > 0.01 ? 1000.0 / smoothedFrameMs_ : 0.0);
+        add("  SIM %.1f  DRAW %.1f  (SHADOW %.1f SCENE %.1f INST %.1f)", simMs_, frameMs_,
+            shadowMs_, sceneMs_, instanceMs_);
+        add("  SIM SPLIT  DECIDE %.1f WALK %.1f CROWD %.1f TRAFFIC %.1f METRO %.1f x%d",
+            stats.decisionMs, stats.walkMs, stats.crowdMs, stats.trafficMs, stats.metroMs,
+            stats.subSteps);
         add("DRAWS %d  TRIS %dK  CHUNKS %zu/%zu", drawCalls_, visibleTriangles_ / 1000,
             visibleChunks_.size(), geometry_.chunks().size());
         add("DRAWN  PEOPLE %zu  VEHICLES %zu  PROPS %zu", drawnPeople_, drawnVehicles_, drawnProps_);

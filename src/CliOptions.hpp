@@ -34,6 +34,7 @@ namespace CnaCity
         RunMode mode = RunMode::Interactive;
         Quality quality = Quality::High;
         CameraMode camera = CameraMode::Orbit;
+        int overlay = 1;   ///< Index into Overlay: 0 none, 1 statistics, 2 road network, 3 routes.
 
         int windowWidth = 1600;
         int windowHeight = 900;

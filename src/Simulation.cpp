@@ -15,12 +15,24 @@ namespace CnaCity
     namespace
     {
         constexpr float kPi = 3.14159265358979323846f;
-        /// How many routes may be planned in one tick. A hundred thousand people do not all leave
-        /// for work on the same tick, but eight thousand of them can, and an unbounded planning
-        /// pass would turn one tick of the morning peak into a visible stall. The overflow is
-        /// deferred to the next tick, which in a simulation whose clock runs at 180x is a delay of
-        /// well under a simulated second.
-        constexpr std::uint32_t kPlanBudgetPerTick = 900;
+        /// How many routes may be planned in one decision pass.
+        ///
+        /// A hundred thousand people do not all leave for work at once, but several thousand can,
+        /// and an unbounded planning pass turns one tick of the peak into a visible stall. The
+        /// number is set by measurement rather than taste: a plan costs about 13 microseconds
+        /// averaged over hits and misses, so 320 of them is a little over four milliseconds --
+        /// about a quarter of a frame at sixty hertz, and the most a single pass may take without
+        /// being felt.
+        ///
+        /// It was 900, from when decisions ran on every tick. Moving them onto simulated time made
+        /// the passes less frequent without making them smaller, and the result was a decision
+        /// pass costing 11.6 ms on the evening peak -- the largest single item in the frame, and
+        /// larger than the entire renderer.
+        ///
+        /// Demand at the busiest moment of the day is around 35 trips a simulated second, and a
+        /// pass runs at least every 1.5 of those, so the budget is roughly six times what the peak
+        /// actually asks for. The overflow is deferred rather than dropped.
+        constexpr std::uint32_t kPlanBudgetPerTick = 320;
         /// Decisions are checked at a fraction of the tick rate, staggered across agents.
         constexpr std::uint32_t kDecisionStride = 8;
         constexpr float kArriveRadius = 3.2f;
@@ -415,7 +427,15 @@ namespace CnaCity
         wantsDestination_.resize(count);
         wantsActivity_.resize(count);
 
-        const auto stride = static_cast<std::uint32_t>(tick_ % kDecisionStride);
+        // The stride cycles on the *decision pass* counter, not on the tick.
+        //
+        // It used to use the tick, which was correct only while decisions ran on every one of
+        // them. Once they were moved onto simulated time they ran on roughly every other tick, the
+        // stride sequence became 0, 2, 4, 6, 0, ... and the four odd strides were never selected:
+        // half the city simply never considered its schedule again. The population on foot at the
+        // morning peak fell from six thousand to two, which is the kind of change that looks like
+        // tuning and is a bug.
+        const std::uint32_t stride = decisionPass_++ % kDecisionStride;
         jobs_.ParallelFor(count, 2048, [&](std::size_t begin, std::size_t end) {
             for (std::size_t i = begin; i < end; ++i)
             {
@@ -614,7 +634,7 @@ namespace CnaCity
         for (std::uint32_t agent : walking_) crowdItems_[cursor[bucketOf(agents_.position[agent])]++] = agent;
     }
 
-    void Simulation::CollectModeLists()
+    void Simulation::CollectModeLists(bool withActivityHistogram)
     {
         walking_.clear();
         waiting_.clear();
@@ -637,6 +657,9 @@ namespace CnaCity
         stats_.waitingTrain = static_cast<std::uint32_t>(waiting_.size());
         stats_.riding = static_cast<std::uint32_t>(riding_.size());
 
+        // The activity histogram is for the HUD alone and costs a full pass over the population,
+        // so it runs once per Step rather than once per movement sub-step.
+        if (!withActivityHistogram) return;
         for (int a = 0; a < kActivityCount; ++a) stats_.activityCount[a] = 0;
         for (std::uint32_t i = 0; i < agents_.size(); ++i)
             ++stats_.activityCount[agents_.activity[i]];
@@ -978,10 +1001,25 @@ namespace CnaCity
         clock_.Advance(simulatedSeconds);
         weather_.Update(simulatedSeconds, clock_.hour());
 
-        CollectModeLists();
-
+        // Decisions run on simulated time, not on frames.
+        //
+        // A citizen's schedule turns over on the scale of minutes, so re-examining it more often
+        // than once a simulated second buys nothing -- and tying it to the frame meant that a
+        // machine drawing at 120 fps paid four times as much for the same simulated day as one
+        // drawing at 30. The activity histogram the HUD reads rides along with it for the same
+        // reason: it is a full pass over the population and nobody can see it change faster.
+        decisionAccumulator_ += simulatedSeconds;
         watch.Restart();
-        RunDecisions(simulatedSeconds);
+        if (decisionAccumulator_ >= 1.5f)
+        {
+            CollectModeLists(true);
+            RunDecisions(decisionAccumulator_);
+            decisionAccumulator_ = 0.0f;
+        }
+        else
+        {
+            CollectModeLists(false);
+        }
         stats_.decisionMs = ElapsedMs(watch);
 
         // One decision pass, several movement passes. Sub-stepping the decisions too would cost
@@ -991,7 +1029,7 @@ namespace CnaCity
         const float h = simulatedSeconds / static_cast<float>(subSteps);
         for (int i = 0; i < subSteps; ++i)
         {
-            if (i > 0) CollectModeLists();
+            if (i > 0) CollectModeLists(false);
             StepMovement(h);
         }
         stats_.subSteps = subSteps;

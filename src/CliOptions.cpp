@@ -87,6 +87,7 @@ namespace CnaCity
             "  --no-vsync            Do not wait for the vertical retrace\n"
             "  --camera M            free, orbit (default), follow, street, cinematic\n"
             "  --follow              Shorthand for --camera follow\n"
+            "  --overlay M           none, stats (default), roads, routes\n"
             "\n"
             "Measurement\n"
             "  --bench               Run the scale sweep and exit\n"
@@ -164,6 +165,16 @@ namespace CnaCity
                 else if (mode == "street") options.camera = CameraMode::Street;
                 else if (mode == "cinematic") options.camera = CameraMode::Cinematic;
                 else { options.error = "--camera: expected free, orbit, follow, street or cinematic"; return false; }
+            }
+            else if (arg == "--overlay")
+            {
+                if (!next(value)) { options.error = "--overlay needs a name"; return false; }
+                const std::string name = value;
+                if (name == "none") options.overlay = 0;
+                else if (name == "stats") options.overlay = 1;
+                else if (name == "roads") options.overlay = 2;
+                else if (name == "routes") options.overlay = 3;
+                else { options.error = "--overlay: expected none, stats, roads or routes"; return false; }
             }
             else if (arg == "--bench") options.mode = RunMode::Benchmark;
             else if (arg == "--headless") options.mode = RunMode::Headless;
