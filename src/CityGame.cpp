@@ -99,10 +99,29 @@ namespace CnaCity
         // independent: SSAO without the depth-normal prepass is a no-op, bloom without HDR has
         // nothing above white to bloom from, and a shadow cascade count that outruns the atlas
         // costs resolution rather than buying range.
+        // Every setting is named, including the ones being switched *off*.
+        //
+        // `RenderPipelineSettings` has its own defaults and several of them are not zero, so a
+        // quality level that only sets what it wants inherits the rest. That is how a band of red
+        // and green fringing ended up along every roofline against the sky at High: chromatic
+        // aberration was never asked for and never turned off, and it is at its strongest at the
+        // top of the frame where the contrast is.
         settings.setHDREnabled(true);
         settings.setTonemappingMode(TonemappingMode::Aces);
         settings.setExposure(1.0f);
+        settings.setGamma(2.2f);
         settings.setShadowsEnabled(true);
+        settings.setChromaticAberrationStrength(0.0f);
+        settings.setFilmGrainIntensity(0.0f);
+        settings.setLensFlareIntensity(0.0f);
+        settings.setLightShaftIntensity(0.0f);
+        settings.setColorGradeEnabled(false);
+        settings.setDOFEnabled(false);
+        settings.setMotionBlurStrength(0.0f);
+        settings.setSSREnabled(false);
+        settings.setSSAOEnabled(false);
+        settings.setBloomEnabled(false);
+        settings.setFXAAEnabled(false);
 
         switch (options_.quality)
         {
@@ -140,7 +159,6 @@ namespace CnaCity
                 settings.setSSAORadius(0.24f);
                 settings.setSSAOIntensity(0.70f);
                 settings.setLightShaftThreshold(0.82f);
-                settings.setLensFlareIntensity(0.0f);
                 break;
             case Quality::Ultra:
                 settings.setRenderQuality(RenderQuality::Ultra);
@@ -161,7 +179,7 @@ namespace CnaCity
                 // screen width of chromatic aberration is not a lens artefact, it is three copies
                 // of the city offset from each other, which is exactly what the first ultra frame
                 // rendered.
-                settings.setChromaticAberrationStrength(0.0018f);
+                settings.setChromaticAberrationStrength(0.0016f);
                 settings.setFilmGrainIntensity(0.015f);
                 break;
         }
