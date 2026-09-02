@@ -608,6 +608,11 @@ namespace CnaCity
         if (pipeline_ != nullptr)
         {
             auto& settings = pipeline_->getSettings();
+            // Ambient occlusion is a contact effect, and from four hundred metres up there are no
+            // contacts left to see -- one screen pixel is several metres of pavement. Switching it
+            // off above roof height costs nothing visible and gives the prepass's 2.9 ms back,
+            // which from an overview is a fifth of the frame.
+            if (prepass_ != nullptr) settings.setSSAOEnabled(camera_.position.Y < 120.0f);
             // Exposure follows the sun, but only just. The first version lifted it to 2.4 after
             // dark on the reasoning that a night scene is dark -- and the result was a city
             // blown to white, because at night the *emitters* dominate: every lit window and
@@ -1208,8 +1213,10 @@ namespace CnaCity
             stats.activityCount[static_cast<int>(Activity::AtHome)],
             stats.activityCount[static_cast<int>(Activity::Asleep)]);
         add("");
-        add("TRAFFIC %u VEHICLES  %.1f M/S MEAN  %u QUEUING", sim_.traffic().activeCount(),
-            static_cast<double>(sim_.traffic().meanSpeed()), sim_.traffic().blockedCount());
+        add("TRAFFIC %u VEHICLES  %.1f M/S MEAN  %u QUEUING  %llu GAVE UP",
+            sim_.traffic().activeCount(), static_cast<double>(sim_.traffic().meanSpeed()),
+            sim_.traffic().blockedCount(),
+            static_cast<unsigned long long>(sim_.traffic().gridlockedCount()));
         add("METRO %zu TRAINS  %u RIDING  %u WAITING", sim_.metro().trains().size(), stats.riding,
             stats.waitingTrain);
         add("");
@@ -1220,6 +1227,12 @@ namespace CnaCity
         add("  SIM SPLIT  DECIDE %.1f WALK %.1f CROWD %.1f TRAFFIC %.1f METRO %.1f x%d",
             stats.decisionMs, stats.walkMs, stats.crowdMs, stats.trafficMs, stats.metroMs,
             stats.subSteps);
+        add("ROUTES %.0f%% CACHED  %u DEFERRED  %u FAILED",
+            sim_.pathfinder().stats().queries > 0
+                ? 100.0 * static_cast<double>(sim_.pathfinder().stats().hits) /
+                      static_cast<double>(sim_.pathfinder().stats().queries)
+                : 0.0,
+            stats.tripsDeferred, stats.routeFailures);
         add("DRAWS %d  TRIS %dK  CHUNKS %zu/%zu", drawCalls_, visibleTriangles_ / 1000,
             visibleChunks_.size(), geometry_.chunks().size());
         add("DRAWN  PEOPLE %zu  VEHICLES %zu  PROPS %zu", drawnPeople_, drawnVehicles_, drawnProps_);

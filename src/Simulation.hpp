@@ -50,7 +50,6 @@ namespace CnaCity
         double crowdMs = 0.0;
         double trafficMs = 0.0;
         double metroMs = 0.0;
-        double planMs = 0.0;        ///< Cumulative route queries, not milliseconds; see Step().
     };
 
     /**

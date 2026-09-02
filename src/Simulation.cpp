@@ -1044,7 +1044,6 @@ namespace CnaCity
             StepMovement(h);
         }
         stats_.subSteps = subSteps;
-        stats_.planMs = static_cast<double>(pathfinder_.stats().queries);
 
         ++tick_;
     }

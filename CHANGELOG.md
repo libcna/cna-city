@@ -24,5 +24,15 @@ everything lives under *Unreleased*.
   volumetric fog, light shafts, and wet-surface response.
 - **Five camera modes**, including a chase camera that follows one named citizen through their
   entire day, and a debug overlay for the road network and live routes.
+- **Screen-space ambient occlusion**, filled from a `DepthNormalPrepass` the game draws itself --
+  it is a contract, not a switch.
 - **`--bench`**, a scale sweep with no graphics device at all, and `--headless` for a full
   simulated day.
+
+### Measured
+On an AMD Radeon 780M with 16 threads, at a hundred thousand citizens: the city generates from one
+seed in 24 ms, the simulation tick averages 2.29 ms (p99 3.70 ms) in 24.5 MB, and the frame runs at
+75 fps from a city overview and 107-145 fps at street level, at 1600x900 with four shadow cascades,
+HDR, bloom and FXAA. A hundred times the agents costs 8.1 times the tick, because the route cache's
+hit rate rises with population from 8% to 38%. Full tables and the defects found along the way are
+in [`ARCHITECTURE.md`](ARCHITECTURE.md).
