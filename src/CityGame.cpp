@@ -361,6 +361,16 @@ namespace CnaCity
         {
             followAgent_ = sim_.PickInterestingAgent(static_cast<std::uint32_t>(frameCount_));
             followSnap_ = true;
+            followLocked_ = false;
+            cameraMode_ = CameraMode::Follow;
+        }
+        if (pressed(Keys::L))
+        {
+            // Locking is what makes "watch one citizen's entire day" possible at all. Unlocked,
+            // the camera moves on from anybody who stays indoors, which is the right default --
+            // most people are indoors most of the time and a chase camera pointed at a front door
+            // is not a demonstration. Locked, it waits outside that door instead.
+            followLocked_ = !followLocked_;
             cameraMode_ = CameraMode::Follow;
         }
         if (pressed(Keys::F))
@@ -462,7 +472,7 @@ namespace CnaCity
                 // asleep as on their way to work.
                 const auto currentMode = static_cast<Mode>(sim_.agents().mode[followAgent_]);
                 followIdleSeconds_ = currentMode == Mode::Indoors ? followIdleSeconds_ + dt : 0.0f;
-                if (followIdleSeconds_ > 2.5f)
+                if (!followLocked_ && followIdleSeconds_ > 2.5f)
                 {
                     followAgent_ = sim_.PickInterestingAgent(
                         static_cast<std::uint32_t>(frameCount_ * 7 + 13));
@@ -1411,6 +1421,8 @@ namespace CnaCity
         add("  SIM SPLIT  DECIDE %.1f WALK %.1f CROWD %.1f TRAFFIC %.1f METRO %.1f x%d",
             stats.decisionMs, stats.walkMs, stats.crowdMs, stats.trafficMs, stats.metroMs,
             stats.subSteps);
+        add("WALKED FROM A PARKED CAR  %llu",
+            static_cast<unsigned long long>(stats.abandonedWalks));
         add("ROUTES %.0f%% CACHED  %u DEFERRED  %u FAILED",
             sim_.pathfinder().stats().queries > 0
                 ? 100.0 * static_cast<double>(sim_.pathfinder().stats().hits) /
@@ -1456,7 +1468,8 @@ namespace CnaCity
         {
             const Agents& agents = sim_.agents();
             const std::uint32_t agent = followAgent_;
-            std::snprintf(line, sizeof(line), "CITIZEN #%u", agent);
+            std::snprintf(line, sizeof(line), "CITIZEN #%u%s", agent,
+                          followLocked_ ? "   [LOCKED]" : "");
             right.emplace_back(line);
             right.emplace_back(sim_.DescribeAgent(agent));
             const std::uint32_t home = agents.home[agent];
@@ -1519,7 +1532,7 @@ namespace CnaCity
             }
         }
 
-        const char* help = "1-5 CAMERA   N NEXT CITIZEN   F WEATHER   T/G CLOCK   TAB OVERLAY   "
+        const char* help = "1-5 CAMERA   N NEXT   L LOCK   F WEATHER   T/G CLOCK   TAB OVERLAY   "
                            "P PAUSE   F1 HUD   F2 POST   F3 GPU";
         text_.DrawShadowed(*batch_, help, 16,
                            device.getViewportProperty().getHeightProperty() - lineHeight - 10,

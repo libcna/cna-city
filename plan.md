@@ -83,7 +83,7 @@ the lamps *are* real lights, `CNA-FINDINGS.md` says they cannot be. The findings
 
 ## P5 — The follow camera should be able to follow a whole day
 
-- [ ] **P5.1 Keep the subject.** The camera abandons anyone who stays indoors for two and a half
+- [x] **P5.1 Keep the subject.** The camera abandons anyone who stays indoors for two and a half
   seconds, so "watch one citizen's entire day" is exactly what it cannot do. *Accept:* a key locks
   the subject; locked, the camera waits outside their door and picks them up when they leave.
 
@@ -106,6 +106,6 @@ the lamps *are* real lights, `CNA-FINDINGS.md` says they cannot be. The findings
 
 ## P8 — Honesty about arrivals
 
-- [ ] **P8.1 Drivers teleport on arrival.** `FinishTrip` moves the agent to the destination doorway
+- [x] **P8.1 Drivers teleport on arrival.** `FinishTrip` moves the agent to the destination doorway
   from wherever the car happened to be, which for a vehicle abandoned to gridlock is a jump across
   the city. *Accept:* a driver who ends up more than a short walk from the door walks the rest.

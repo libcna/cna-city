@@ -378,13 +378,54 @@ namespace CnaCity
 
     void Simulation::FinishTrip(std::uint32_t agent)
     {
+        // A driver whose car has stopped a long way from the door walks the rest, rather than being
+        // moved to it.
+        //
+        // The old behaviour teleported every arriving agent to the destination's doorway from
+        // wherever the vehicle happened to be. For a normal arrival that is a few tens of metres
+        // and unnoticeable; for one of the three thousand vehicles a day that give up on gridlock
+        // it is a jump across the city, and a demonstration that quietly relocates the citizen it
+        // could not deliver is reporting a success it did not have.
+        const std::uint32_t destination = agents_.targetBuilding[agent];
+        const bool wasDriving = agents_.vehicle[agent] != kNoIndex;
+        if (wasDriving && destination != kNoIndex)
+        {
+            const Vec2 door = city_.buildings()[destination].doorway;
+            if (DistanceSq(agents_.position[agent], door) > 45.0f * 45.0f)
+            {
+                traffic_.Despawn(agents_.vehicle[agent]);
+                agents_.vehicle[agent] = kNoIndex;
+                const std::uint32_t startNode = city_.roads().FindNearestNode(agents_.position[agent]);
+                scratchPath_.clear();
+                const std::uint32_t length = pathfinder_.FindPath(
+                    startNode, DoorNodeOf(destination), TravelMode::Foot, scratchPath_);
+                ReleaseRoute(agent);
+                if (length >= 2)
+                {
+                    const std::uint32_t slot = routes_.Acquire();
+                    if (slot != kNoIndex)
+                    {
+                        const std::uint32_t stored = std::min<std::uint32_t>(length, kMaxPathNodes);
+                        std::copy(scratchPath_.begin(), scratchPath_.begin() + stored,
+                                  routes_.At(slot));
+                        agents_.pathSlot[agent] = slot;
+                        agents_.pathLength[agent] = static_cast<std::uint16_t>(stored);
+                        agents_.pathCursor[agent] = 0;
+                        agents_.mode[agent] = static_cast<std::uint8_t>(Mode::Walking);
+                        agents_.speed[agent] = 0.0f;
+                        ++stats_.abandonedWalks;
+                        return;
+                    }
+                }
+            }
+        }
+
         ReleaseRoute(agent);
         if (agents_.vehicle[agent] != kNoIndex)
         {
             traffic_.Despawn(agents_.vehicle[agent]);
             agents_.vehicle[agent] = kNoIndex;
         }
-        const std::uint32_t destination = agents_.targetBuilding[agent];
         if (destination != kNoIndex)
             agents_.position[agent] = city_.buildings()[destination].doorway;
         agents_.mode[agent] = static_cast<std::uint8_t>(Mode::Indoors);

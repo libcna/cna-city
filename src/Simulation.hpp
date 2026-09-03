@@ -44,6 +44,8 @@ namespace CnaCity
         std::uint32_t routeFailures = 0;
         std::uint64_t carTripsFinished = 0;
         std::uint64_t carTripsStarted = 0;
+        /// Drivers who parked far from the door and walked the rest, mostly after a gridlock give-up.
+        std::uint64_t abandonedWalks = 0;
         int subSteps = 1;
         std::uint32_t activityCount[kActivityCount] = {};
         double decisionMs = 0.0;
