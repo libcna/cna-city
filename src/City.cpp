@@ -858,17 +858,11 @@ namespace CnaCity
                 }
             }
 
-            // Bus shelters on the arterials, which is also where the bus routes will be.
-            if (segment.roadClass == RoadClass::Arterial && segment.length > 90.0f && rng.Chance(0.3f))
-            {
-                Prop shelter;
-                shelter.position = a + dir * (segment.length * rng.NextFloat(0.3f, 0.7f)) +
-                                   side * (profile.carriagewayHalfWidth + profile.sidewalkWidth * 0.6f);
-                shelter.rotation = Heading(dir);
-                shelter.kind = PropKind::BusShelter;
-                shelter.district = segment.district;
-                props_.push_back(shelter);
-            }
+            // Bus shelters used to be scattered along the arterials at random, which put them
+            // where no bus ever stopped. They are drawn at the actual stops now -- see
+            // CityGame::CollectInstances -- because a shelter is where a service calls, and a
+            // shelter that is not is a piece of set dressing that contradicts the simulation
+            // running past it.
         }
 
         // One signal head per approach, set back on the corner it governs. Placing them from the

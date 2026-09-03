@@ -360,7 +360,7 @@ namespace CnaCity
                                             static_cast<int>(Overlay::Count));
         if (pressed(Keys::N))
         {
-            followAgent_ = sim_.PickInterestingAgent(static_cast<std::uint32_t>(frameCount_), options_.followMetro);
+            followAgent_ = sim_.PickInterestingAgent(static_cast<std::uint32_t>(frameCount_), FollowFocus());
             followSnap_ = true;
             followLocked_ = false;
             cameraMode_ = CameraMode::Follow;
@@ -461,7 +461,7 @@ namespace CnaCity
                     // Picked lazily rather than at load: the list of people currently outdoors is
                     // built by the first simulation step, so asking before then reliably returned
                     // somebody sitting indoors and the camera hung in the sky above them.
-                    followAgent_ = sim_.PickInterestingAgent(static_cast<std::uint32_t>(frameCount_), options_.followMetro);
+                    followAgent_ = sim_.PickInterestingAgent(static_cast<std::uint32_t>(frameCount_), FollowFocus());
                     followSnap_ = true;
                 }
                 if (followAgent_ == kNoIndex) break;
@@ -477,15 +477,20 @@ namespace CnaCity
                 // this the flag picks a passenger once and then follows them for the rest of their
                 // day above ground, which is the ordinary follow camera with extra steps.
                 const bool wrongPlace =
-                    options_.followMetro && currentMode != Mode::Riding &&
-                    currentMode != Mode::WaitingTrain;
+                    (options_.followMetro && currentMode != Mode::Riding &&
+                     currentMode != Mode::WaitingTrain) ||
+                    (options_.followBus && currentMode != Mode::OnBus &&
+                     currentMode != Mode::WaitingBus);
                 followIdleSeconds_ =
                     (currentMode == Mode::Indoors || wrongPlace) ? followIdleSeconds_ + dt : 0.0f;
-                const float patience = wrongPlace ? 1.5f : 2.5f;
+                // Short, because `--follow-metro` and `--follow-bus` mean "show me that", and a
+                // subject who has finished their ride is now an ordinary pedestrian who happens
+                // to be the one the camera is holding.
+                const float patience = wrongPlace ? 0.5f : 2.5f;
                 if (!followLocked_ && followIdleSeconds_ > patience)
                 {
                     followAgent_ = sim_.PickInterestingAgent(
-                        static_cast<std::uint32_t>(frameCount_ * 7 + 13), options_.followMetro);
+                        static_cast<std::uint32_t>(frameCount_ * 7 + 13), FollowFocus());
                     followIdleSeconds_ = 0.0f;
                     followSnap_ = true;
                     if (followAgent_ == kNoIndex) break;
@@ -502,20 +507,26 @@ namespace CnaCity
                 // the back wall of the station -- 10 m of it. The camera stands beside them
                 // instead and looks along the platform, which is also the only angle from which a
                 // platform looks like a platform: the crowd in a row, the edge, the track beyond.
-                const float distance = mode == Mode::Walking ? 6.5f
-                                     : mode == Mode::Indoors ? 11.0f
-                                     : waiting               ? -7.5f
-                                     : riding                ? 10.5f
-                                                             : 13.0f;
+                // A bus stop is filmed like a pavement, because it is one; a bus is filmed from
+                // further back than a car, because it is eleven metres longer.
+                const float distance = mode == Mode::Walking    ? 6.5f
+                                     : mode == Mode::Indoors    ? 11.0f
+                                     : mode == Mode::WaitingBus ? 7.0f
+                                     : mode == Mode::OnBus      ? 17.0f
+                                     : waiting                  ? -7.5f
+                                     : riding                   ? 10.5f
+                                                                : 13.0f;
                 // Underground the offset has to stay *inside* the tunnel. The running tunnel's
                 // roof is 3.4 m above the track, so the 4.6 m a road vehicle gets puts the lens in
                 // the earth above it looking down through the roof at the skyline -- which is what
                 // the first underground frames showed.
-                const float height = mode == Mode::Walking ? 2.6f
-                                   : mode == Mode::Indoors ? 6.0f
-                                   : waiting               ? 1.70f
-                                   : riding                ? 1.55f
-                                                           : 4.6f;
+                const float height = mode == Mode::Walking    ? 2.6f
+                                   : mode == Mode::Indoors    ? 6.0f
+                                   : mode == Mode::WaitingBus ? 2.4f
+                                   : mode == Mode::OnBus      ? 5.4f
+                                   : waiting                  ? 1.70f
+                                   : riding                   ? 1.55f
+                                                              : 4.6f;
                 // Indoors the subject's heading is stale, so the camera swings off the doorway's
                 // own axis instead: standing behind a citizen who is not facing anywhere puts the
                 // lens inside the building they just walked into.
@@ -524,6 +535,14 @@ namespace CnaCity
                                           : sim_.agents().heading[followAgent_];
                 Vector3 wanted(subject.X - std::cos(heading) * distance, subject.Y + height,
                                subject.Z - std::sin(heading) * distance);
+                if (mode == Mode::OnBus)
+                {
+                    // Out of the traffic lane and onto the pavement side, so the shot is the bus's
+                    // flank going past the shops rather than the back of a box.
+                    const float right = heading + 1.5708f;
+                    wanted = Vector3(wanted.X + std::cos(right) * 5.5f, wanted.Y,
+                                     wanted.Z + std::sin(right) * 5.5f);
+                }
                 if (underground && sim_.MetroCameraPoint(followAgent_, distance,
                                                           waiting ? 0.0f : 2.6f, height, wanted))
                 {
@@ -927,6 +946,7 @@ namespace CnaCity
         instances_.BeginFrame();
         drawnPeople_ = drawnVehicles_ = drawnProps_ = drawnParked_ = 0;
         drawnTrainCars_ = 0;
+        drawnBuses_ = 0;
 
         const Vector3 eye = camera_.position;
         const auto distanceSq = [&](Vec2 p) {
@@ -996,6 +1016,46 @@ namespace CnaCity
             ++drawnVehicles_;
         }
 
+        // A shelter at every stop a service actually calls at, facing the road. This is drawn
+        // from the bus network rather than from the city's prop list for the reason the prop list
+        // no longer has any: a shelter is a property of the service, not of the street.
+        for (const BusStop& stop : sim_.buses().stops())
+        {
+            const float d2 = distanceSq(stop.position);
+            if (propLod_[static_cast<int>(PropKind::BusShelter)].selectIndex(std::sqrt(d2)) < 0)
+                continue;
+            const BoundingBox bounds(Vector3(stop.position.X - 4.0f, -0.5f, stop.position.Y - 4.0f),
+                                      Vector3(stop.position.X + 4.0f, 4.0f, stop.position.Y + 4.0f));
+            if (!culler_.isVisible(bounds)) continue;
+            const float facing = Heading(Perp(stop.kerb - stop.position));
+            instances_.AddProp(PropKind::BusShelter,
+                               Matrix::CreateRotationY(-facing) *
+                                   Matrix::CreateTranslation(stop.position.X, 0.0f, stop.position.Y));
+            ++drawnProps_;
+        }
+
+        // Buses. Not in the vehicle array -- they run a timetable rather than a route, so they
+        // live in BusNetwork with the trains' shape of code -- but they are drawn with the same
+        // instanced body as everything else on the road.
+        for (const Bus& bus : sim_.buses().buses())
+        {
+            Vec2 position(0.0f, 0.0f);
+            float heading = 0.0f;
+            sim_.buses().Placement(bus, position, heading);
+            if (vehicleLod_.selectIndex(std::sqrt(distanceSq(position))) < 0) continue;
+            const BoundingBox bounds(Vector3(position.X - 9.0f, -0.5f, position.Y - 9.0f),
+                                      Vector3(position.X + 9.0f, 5.0f, position.Y + 9.0f));
+            if (!culler_.isVisible(bounds)) continue;
+            // Coloured by route rather than at random. Every bus on the 24 is the same colour and
+            // the one behind it on the 31 is not, which is the cheapest possible legend for a
+            // network overlay you can read from four hundred metres up.
+            instances_.AddVehicle(VehicleKind::Bus,
+                                  static_cast<std::uint8_t>(bus.route %
+                                                            InstanceRenderer::kColorBuckets),
+                                  VehicleTransform(position, heading));
+            ++drawnBuses_;
+        }
+
         // People. Three levels of detail with hard distance bands: near enough to see a walk
         // cycle, near enough to be a person, and far enough to be a moving speck. The bands are
         // where nearly all of the rendering budget for a hundred thousand agents is decided.
@@ -1062,6 +1122,22 @@ namespace CnaCity
         // folded into the walking one, because they are a metre above the rail and the walking
         // pass assumes ground level -- and because a platform with nobody on it is the clearest
         // possible statement that a simulation is not being shown.
+        for (std::uint32_t agent : sim_.busQueueAgents())
+        {
+            const Vec2 position = agents.position[agent];
+            const float d2 = distanceSq(position);
+            if (personLod_.selectIndex(std::sqrt(d2)) < 0) continue;
+            const BoundingBox bounds(Vector3(position.X - 0.6f, 0.0f, position.Y - 0.6f),
+                                      Vector3(position.X + 0.6f, 2.2f, position.Y + 0.6f));
+            if (!culler_.isVisible(bounds)) continue;
+            const int level = personLod_.selectIndex(std::sqrt(d2));
+            instances_.AddPerson(static_cast<PersonLod>(std::max(0, level)), 0,
+                                 agents.Appearance(agent),
+                                 Matrix::CreateRotationY(-agents.heading[agent] + kPi * 0.5f) *
+                                     Matrix::CreateTranslation(position.X, 0.0f, position.Y));
+            ++drawnPeople_;
+        }
+
         for (std::uint32_t agent : sim_.waitingAgents())
         {
             const Vec2 position = agents.position[agent];
@@ -1532,6 +1608,7 @@ namespace CnaCity
         add("POPULATION %u", static_cast<unsigned>(sim_.agents().size()));
         add("  INDOORS %u  ON FOOT %u  DRIVING %u  METRO %u", stats.indoors, stats.walking,
             stats.driving, stats.waitingTrain + stats.riding);
+        add("  ON A BUS %u  AT A STOP %u", stats.onBus, stats.waitingBus);
         add("  AT WORK %u  AT HOME %u  ASLEEP %u",
             stats.activityCount[static_cast<int>(Activity::AtWork)],
             stats.activityCount[static_cast<int>(Activity::AtHome)],
@@ -1543,14 +1620,17 @@ namespace CnaCity
             static_cast<unsigned long long>(sim_.traffic().gridlockedCount()));
         add("METRO %zu TRAINS  %u RIDING  %u WAITING", sim_.metro().trains().size(), stats.riding,
             stats.waitingTrain);
+        add("BUSES %zu ON %zu ROUTES  %zu STOPS  %u RIDING  %u AT STOPS",
+            sim_.buses().buses().size(), sim_.buses().routes().size(), sim_.buses().stops().size(),
+            stats.onBus, stats.waitingBus);
         add("");
         add("FRAME %.1f MS (%.0f FPS)", smoothedFrameMs_,
             smoothedFrameMs_ > 0.01 ? 1000.0 / smoothedFrameMs_ : 0.0);
         add("  SIM %.1f  DRAW %.1f  (SHADOW %.1f PREPASS %.1f SCENE %.1f INST %.1f)", simMs_,
             frameMs_, shadowMs_, prepassMs_, sceneMs_, instanceMs_);
-        add("  SIM SPLIT  DECIDE %.1f WALK %.1f CROWD %.1f TRAFFIC %.1f METRO %.1f x%d",
+        add("  SIM SPLIT  DECIDE %.1f WALK %.1f CROWD %.1f TRAFFIC %.1f METRO %.1f BUS %.1f x%d",
             stats.decisionMs, stats.walkMs, stats.crowdMs, stats.trafficMs, stats.metroMs,
-            stats.subSteps);
+            stats.busMs, stats.subSteps);
         add("WALKED FROM A PARKED CAR  %llu",
             static_cast<unsigned long long>(stats.abandonedWalks));
         add("ROUTES %.0f%% CACHED  %u DEFERRED  %u FAILED",
@@ -1561,8 +1641,8 @@ namespace CnaCity
             stats.tripsDeferred, stats.routeFailures);
         add("DRAWS %d  TRIS %dK  CHUNKS %zu/%zu", drawCalls_, visibleTriangles_ / 1000,
             visibleChunks_.size(), geometry_.chunks().size());
-        add("DRAWN  PEOPLE %zu  MOVING %zu  PARKED %zu  PROPS %zu  CARS %zu", drawnPeople_,
-            drawnVehicles_, drawnParked_, drawnProps_, drawnTrainCars_);
+        add("DRAWN  PEOPLE %zu  MOVING %zu  PARKED %zu  PROPS %zu  RAIL %zu  BUS %zu",
+            drawnPeople_, drawnVehicles_, drawnParked_, drawnProps_, drawnTrainCars_, drawnBuses_);
         add("");
         add("CAMERA %s AT %.0f %.0f %.0f   TIME x%.0f%s", CameraModeName(cameraMode_),
             camera_.position.X, camera_.position.Y, camera_.position.Z,
@@ -1629,6 +1709,13 @@ namespace CnaCity
             {
                 std::snprintf(line, sizeof(line), "ALIGHTS AT %s",
                               sim_.metro().stations()[agents.metroAlight[agent]].name.c_str());
+                right.emplace_back(line);
+            }
+            if (agents.busAlight[agent] != kNoIndex &&
+                agents.busAlight[agent] < sim_.buses().stops().size())
+            {
+                const BusStop& stop = sim_.buses().stops()[agents.busAlight[agent]];
+                std::snprintf(line, sizeof(line), "GETS OFF AT %s", stop.name.c_str());
                 right.emplace_back(line);
             }
         }

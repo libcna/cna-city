@@ -51,6 +51,10 @@ namespace CnaCity
         /// "is that white wash the geometry or the tonemapper" is the first question every
         /// lighting bug asks.
         bool noPost = false;
+        /// Start the follow camera on somebody using the buses. The counterpart of
+        /// @ref followMetro, and needed for the same reason: four hundred citizens on a bus out of
+        /// a hundred thousand is not something a random pick finds.
+        bool followBus = false;
         bool showHelp = false;
         bool listWeather = false;
         std::string error;

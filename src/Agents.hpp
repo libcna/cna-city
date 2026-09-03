@@ -35,7 +35,9 @@ namespace CnaCity
         Walking,
         Driving,
         WaitingTrain,    ///< On a platform, underground.
-        Riding           ///< On a train, moving with it.
+        Riding,          ///< On a train, moving with it.
+        WaitingBus,      ///< At a stop on the pavement.
+        OnBus            ///< Aboard, moving with the bus.
     };
 
     /** @brief The demographic, which decides the daily schedule and whether they own a car. */
@@ -126,6 +128,9 @@ namespace CnaCity
         std::vector<std::uint32_t> metroBoard;
         std::vector<std::uint32_t> metroAlight;
         std::vector<std::uint32_t> metroTrain;
+        std::vector<std::uint32_t> busBoard;     ///< Stop being walked to, or kNoIndex.
+        std::vector<std::uint32_t> busAlight;
+        std::vector<std::uint32_t> busVehicle;   ///< Index into BusNetwork's fleet, or kNoIndex.
         std::vector<float> waitTimer;            ///< Seconds left indoors, or on a platform.
 
         // --- Identity and schedule: read once per day -------------------------------------------

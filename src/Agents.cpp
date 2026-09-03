@@ -29,6 +29,8 @@ namespace CnaCity
             case Mode::Driving:      return "driving";
             case Mode::WaitingTrain: return "on the platform";
             case Mode::Riding:       return "on the metro";
+            case Mode::WaitingBus:   return "at a bus stop";
+            case Mode::OnBus:        return "on a bus";
         }
         return "?";
     }
@@ -95,6 +97,9 @@ namespace CnaCity
         metroBoard.assign(count, kNoIndex);
         metroAlight.assign(count, kNoIndex);
         metroTrain.assign(count, kNoIndex);
+        busBoard.assign(count, kNoIndex);
+        busAlight.assign(count, kNoIndex);
+        busVehicle.assign(count, kNoIndex);
         waitTimer.assign(count, 0.0f);
 
         home.assign(count, kNoIndex);

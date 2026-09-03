@@ -214,7 +214,40 @@ namespace CnaCity
             // first version made the car's glass wider and taller than the greenhouse it sits in,
             // which swallowed the roof and left every car looking like a white slab with a black
             // lid.
-            if (boxy)
+            if (kind == VehicleKind::Bus)
+            {
+                // A bus is glazed almost from end to end, in bays with pillars between them, and
+                // it is the pillars that make it a bus. One continuous band -- which is what a
+                // bus got when it shared the lorries' code -- reads as a white box with a stripe
+                // painted on it, and that is exactly what the follow camera showed.
+                const float base = sill + bodyHeight * 0.42f;
+                const float height = bodyHeight * 0.40f;
+                constexpr int kBays = 6;
+                for (int i = 0; i < kBays; ++i)
+                {
+                    const float centre = (static_cast<float>(i) - (kBays - 1) * 0.5f) *
+                                         (halfLength * 1.72f / kBays);
+                    mesh.AddBox(Vec2(centre, 0.0f), base,
+                                Vec2(halfLength * 0.72f / kBays, halfWidth * 1.012f), height, 0.0f,
+                                Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));
+                }
+                // The windscreen, deeper than the side bays and set at the front where it belongs,
+                // and a rear window, which is the only thing anybody following a bus ever sees of
+                // its glazing.
+                mesh.AddBox(Vec2(halfLength * 0.93f, 0.0f), base - height * 0.30f,
+                            Vec2(halfLength * 0.06f, halfWidth * 0.90f), height * 1.45f, 0.0f,
+                            Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));
+                mesh.AddBox(Vec2(-halfLength * 0.955f, 0.0f), base,
+                            Vec2(halfLength * 0.05f, halfWidth * 0.84f), height * 1.10f, 0.0f,
+                            Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));
+                // Two doors, floor to roofline on the nearside only, which is the side that faces
+                // the kerb the passengers are standing on.
+                for (const float at : {halfLength * 0.55f, -halfLength * 0.28f})
+                    mesh.AddBox(Vec2(at, -halfWidth * 0.52f), sill + 0.02f,
+                                Vec2(halfLength * 0.045f, halfWidth * 0.50f), bodyHeight * 0.82f,
+                                0.0f, Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));
+            }
+            else if (boxy)
                 mesh.AddBox(Vec2(0.0f, 0.0f), sill + bodyHeight * 0.46f,
                             Vec2(halfLength * 0.94f, halfWidth * 1.012f), bodyHeight * 0.34f, 0.0f,
                             Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));

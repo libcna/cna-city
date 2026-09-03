@@ -27,6 +27,7 @@ namespace CnaCity
             double crowdMs = 0.0;
             double trafficMs = 0.0;
             double metroMs = 0.0;
+            double busMs = 0.0;
             double memoryMb = 0.0;
             std::uint64_t routeQueries = 0;
             double cacheHitRate = 0.0;
@@ -75,6 +76,7 @@ namespace CnaCity
                 result.crowdMs += stats.crowdMs;
                 result.trafficMs += stats.trafficMs;
                 result.metroMs += stats.metroMs;
+                result.busMs += stats.busMs;
                 const std::uint32_t travelling = stats.walking + stats.driving + stats.riding +
                                                  stats.waitingTrain;
                 result.peakTravelling = std::max(result.peakTravelling, travelling);
@@ -93,6 +95,7 @@ namespace CnaCity
             result.crowdMs /= count;
             result.trafficMs /= count;
             result.metroMs /= count;
+            result.busMs /= count;
 
             // The 99th percentile matters more than the mean here: the morning peak is one long
             // burst of route planning, and a mean that hides it would report a frame budget the
@@ -127,6 +130,8 @@ namespace CnaCity
                     city.roads().TotalLength() / 1000.0);
         std::printf("  metro     %zu lines, %zu stations, %zu trains\n", sim.metro().lines().size(),
                     sim.metro().stations().size(), sim.metro().trains().size());
+        std::printf("  buses     %zu routes, %zu stops, %zu buses\n", sim.buses().routes().size(),
+                    sim.buses().stops().size(), sim.buses().buses().size());
         std::printf("  capacity  %u homes, %u jobs for %u citizens\n", city.totalResidentCapacity(),
                     city.totalJobCapacity(), options.sim.agentCount);
         std::printf("  setup     %.0f ms on %d threads, %.1f MB\n\n", ElapsedMs(watch),
@@ -160,12 +165,14 @@ namespace CnaCity
             results.push_back(RunOneScale(options.sim, agents, 6.0f, false));
         }
 
-        std::printf("\n%-9s %8s %8s %8s %8s %8s %8s %8s %8s %8s %9s\n", "agents", "setup", "mean",
-                    "p99", "worst", "decide", "walk", "crowd", "traffic", "MB", "peak");
+        std::printf("\n%-9s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %9s\n", "agents", "setup",
+                    "mean", "p99", "worst", "decide", "walk", "crowd", "traffic", "metro", "bus",
+                    "MB", "peak");
         for (const ScaleResult& r : results)
-            std::printf("%-9u %8.0f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.1f %9u\n", r.agents,
-                        r.setupMs, r.meanMs, r.p99Ms, r.worstMs, r.decisionMs, r.walkMs, r.crowdMs,
-                        r.trafficMs, r.memoryMb, r.peakTravelling);
+            std::printf("%-9u %8.0f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.1f "
+                        "%9u\n",
+                        r.agents, r.setupMs, r.meanMs, r.p99Ms, r.worstMs, r.decisionMs, r.walkMs,
+                        r.crowdMs, r.trafficMs, r.metroMs, r.busMs, r.memoryMb, r.peakTravelling);
 
         // Scaling, which is the number the whole exercise is for. Linear would be 1.0.
         if (results.size() > 1)
@@ -192,13 +199,13 @@ namespace CnaCity
                 return 1;
             }
             std::fprintf(file, "agents,setup_ms,mean_ms,p99_ms,worst_ms,decision_ms,walk_ms,"
-                               "crowd_ms,traffic_ms,metro_ms,memory_mb,route_queries,cache_hit,"
+                               "crowd_ms,traffic_ms,metro_ms,bus_ms,memory_mb,route_queries,cache_hit,"
                                "peak_travelling,gridlocked\n");
             for (const ScaleResult& r : results)
-                std::fprintf(file, "%u,%.3f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.2f,%llu,"
+                std::fprintf(file, "%u,%.3f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.2f,%llu,"
                                    "%.4f,%u,%llu\n",
                              r.agents, r.setupMs, r.meanMs, r.p99Ms, r.worstMs, r.decisionMs,
-                             r.walkMs, r.crowdMs, r.trafficMs, r.metroMs, r.memoryMb,
+                             r.walkMs, r.crowdMs, r.trafficMs, r.metroMs, r.busMs, r.memoryMb,
                              static_cast<unsigned long long>(r.routeQueries), r.cacheHitRate,
                              r.peakTravelling, static_cast<unsigned long long>(r.gridlocked));
             std::fclose(file);

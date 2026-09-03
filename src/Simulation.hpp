@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "Agents.hpp"
+#include "BusNetwork.hpp"
 #include "City.hpp"
 #include "JobSystem.hpp"
 #include "MetroNetwork.hpp"
@@ -28,6 +29,7 @@ namespace CnaCity
         bool randomWeather = true;
         float carOwnership = 0.62f;      ///< Share of adults with a car available.
         int metroLines = 5;
+        int busRoutes = 14;
         int threads = 0;                 ///< 0 means "as many as the machine has".
     };
 
@@ -39,6 +41,8 @@ namespace CnaCity
         std::uint32_t driving = 0;
         std::uint32_t waitingTrain = 0;
         std::uint32_t riding = 0;
+        std::uint32_t waitingBus = 0;
+        std::uint32_t onBus = 0;
         std::uint32_t tripsStarted = 0;
         std::uint32_t tripsDeferred = 0;   ///< Wanted to leave but the tick's planning budget was spent.
         std::uint32_t routeFailures = 0;
@@ -53,6 +57,7 @@ namespace CnaCity
         double crowdMs = 0.0;
         double trafficMs = 0.0;
         double metroMs = 0.0;
+        double busMs = 0.0;
     };
 
     /**
@@ -95,6 +100,7 @@ namespace CnaCity
         [[nodiscard]] const SimConfig& config() const { return config_; }
         [[nodiscard]] const City& city() const { return city_; }
         [[nodiscard]] const MetroNetwork& metro() const { return metro_; }
+        [[nodiscard]] const BusNetwork& buses() const { return buses_; }
         [[nodiscard]] const Traffic& traffic() const { return traffic_; }
         [[nodiscard]] const Agents& agents() const { return agents_; }
         [[nodiscard]] const WorldClock& clock() const { return clock_; }
@@ -111,6 +117,8 @@ namespace CnaCity
         [[nodiscard]] const std::vector<std::uint32_t>& walkingAgents() const { return walking_; }
         /** @brief The agents standing on a platform. The renderer draws these too. */
         [[nodiscard]] const std::vector<std::uint32_t>& waitingAgents() const { return waiting_; }
+        /** @brief The agents standing at a bus stop, which is above ground and drawn as such. */
+        [[nodiscard]] const std::vector<std::uint32_t>& busQueueAgents() const { return atStop_; }
 
         /** @brief Where an agent is in the world, including its height when it is underground. */
         [[nodiscard]] Microsoft::Xna::Framework::Vector3 AgentWorldPosition(std::uint32_t agent) const;
@@ -137,16 +145,24 @@ namespace CnaCity
         /** @brief A one-line description of what an agent is doing, for the follow camera's panel. */
         [[nodiscard]] std::string DescribeAgent(std::uint32_t agent) const;
 
-        /** @brief Picks an agent that is currently outdoors, for the follow camera to adopt. */
+        /** @brief What kind of citizen the follow camera would rather watch. */
+        enum class Focus : std::uint8_t
+        {
+            Anybody = 0,
+            Metro,   ///< On a platform or a train.
+            Bus      ///< At a stop or aboard.
+        };
+
         /**
          * @brief Picks an agent the follow camera can usefully watch.
          *
          * @param hint  Varies the choice between calls.
-         * @param metro True to prefer somebody on a platform or a train. Underground is the least
-         *              likely place for a randomly chosen citizen to be -- about one in a thousand
-         *              at the morning peak -- so seeing that half of a commute needs asking for it.
+         * @param focus Which half of the city to prefer. Public transport is the least likely
+         *              place for a randomly chosen citizen to be -- a few in a thousand at the
+         *              morning peak -- so seeing that part of a commute has to be asked for.
          */
-        [[nodiscard]] std::uint32_t PickInterestingAgent(std::uint32_t hint, bool metro = false) const;
+        [[nodiscard]] std::uint32_t PickInterestingAgent(std::uint32_t hint,
+                                                         Focus focus = Focus::Anybody) const;
 
         /** @brief Estimated resident memory of the simulation, for the HUD. */
         [[nodiscard]] std::size_t MemoryBytes() const;
@@ -160,6 +176,17 @@ namespace CnaCity
         void StepMovement(float dt);
         void StepWalking(float dt);
         void StepMetroPassengers(float dt);
+        void StepBusPassengers(float dt);
+        /**
+         * @brief Plans and installs a walking route from @p startNode to the agent's destination.
+         *
+         * The same eighteen lines appeared four times -- after a train, after a bus, after giving
+         * up on either, and after abandoning a car -- and one of the copies is always the one that
+         * gets a fix late.
+         */
+        void PlanWalkFrom(std::uint32_t agent, std::uint32_t startNode);
+        /** @brief Whether a vehicle at @p at heading toward @p ahead has a green at the junction. */
+        [[nodiscard]] bool TrafficMayProceed(Vec2 at, Vec2 ahead) const;
         void RebuildCrowdGrid();
         void CollectModeLists(bool withActivityHistogram);
         [[nodiscard]] Vec2 SidewalkPoint(std::uint32_t fromNode, std::uint32_t toNode,
@@ -169,6 +196,7 @@ namespace CnaCity
         SimConfig config_;
         City city_;
         MetroNetwork metro_;
+        BusNetwork buses_;
         Pathfinder pathfinder_;
         Traffic traffic_;
         Agents agents_;
@@ -196,6 +224,8 @@ namespace CnaCity
         std::vector<std::uint32_t> walking_;
         std::vector<std::uint32_t> waiting_;
         std::vector<std::uint32_t> riding_;
+        std::vector<std::uint32_t> atStop_;
+        std::vector<std::uint32_t> onBus_;
         /// Agents that want to start a trip this tick, gathered in parallel and then planned in
         /// order. Planning touches the shared Pathfinder and the route pool, neither of which is
         /// thread-safe, and making them so would cost more than the serial pass does.
@@ -210,6 +240,8 @@ namespace CnaCity
 
         /// Per station, the agents standing on the platform. A train that dwells drains these.
         std::vector<std::vector<std::uint32_t>> platformQueue_;
+        /// The same, per bus stop.
+        std::vector<std::vector<std::uint32_t>> stopQueue_;
 
         // --- The crowd grid ---------------------------------------------------------------------
         // A hashed uniform grid over pedestrians, rebuilt every tick. It is hashed rather than

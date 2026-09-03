@@ -150,8 +150,12 @@ namespace CnaCity
                               ? city.roads().nodes()[segment.nodeA].position
                               : city.roads().nodes()[segment.nodeB].position;
         const Vec2 dir = vehicle.forward ? segment.direction : -segment.direction;
-        // Right-hand traffic: the lane centre is to the right of the direction of travel, and
-        // `Perp` turns left, so the offset is negated.
+        // This city drives on the left. `Perp` of the direction of travel is the vehicle's own
+        // right -- checked by putting a camera at `+Perp` from a bus and seeing which side of the
+        // frame the bus came out on -- so negating the offset puts the lane centre to the
+        // vehicle's left of the road centreline, which is what the markings and the kerbside
+        // parking assume. The comment here used to say "right-hand traffic", which was a
+        // description of the intent rather than of the code.
         const float offset = profile.laneWidth * (static_cast<float>(vehicle.lane) + 0.5f);
         outPosition = from + dir * vehicle.s - Perp(dir) * offset;
         outHeading = Heading(dir);
@@ -218,16 +222,20 @@ namespace CnaCity
         vehicle.speed = 0.0f;
         vehicle.active = 1;
 
-        // The fleet mix. Buses and lorries are rare on purpose -- roughly one vehicle in twenty --
-        // and that is enough for them to be the thing everybody else is queuing behind.
+        // The fleet mix. Lorries are rare on purpose -- roughly one vehicle in twenty -- and that
+        // is enough for them to be the thing everybody else is queuing behind.
+        //
+        // No buses. This used to hand a twelve-metre bus body to one private commuter in
+        // twenty-five, so four hundred citizens a day drove a bus to work by themselves while
+        // every shelter on every arterial was decoration. A bus is a service, not a body shape;
+        // it lives in BusNetwork now and carries passengers.
         const std::uint32_t roll = rngBits % 100u;
         vehicle.kind = static_cast<std::uint8_t>(
             roll < 46 ? VehicleKind::Car
-                      : roll < 76 ? VehicleKind::Hatchback
-                                  : roll < 88 ? VehicleKind::Van
-                                              : roll < 93 ? VehicleKind::Taxi
-                                                          : roll < 97 ? VehicleKind::Bus
-                                                                      : VehicleKind::Truck);
+                      : roll < 78 ? VehicleKind::Hatchback
+                                  : roll < 90 ? VehicleKind::Van
+                                              : roll < 96 ? VehicleKind::Taxi
+                                                          : VehicleKind::Truck);
         vehicle.appearance = static_cast<std::uint8_t>((rngBits >> 8) & 0x0Fu);
         (void)agents;
 

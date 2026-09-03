@@ -88,6 +88,7 @@ namespace CnaCity
             "  --camera M            free, orbit (default), follow, street, cinematic\n"
             "  --follow              Shorthand for --camera follow\n"
             "  --follow-metro        Follow somebody using the underground, not somebody on foot\n"
+            "  --follow-bus          Follow somebody using the buses\n"
             "  --no-post             Start with the post chain bypassed (what F2 toggles)\n"
             "  --overlay M           none, stats (default), roads, routes\n"
             "\n"
@@ -163,6 +164,7 @@ namespace CnaCity
             else if (arg == "--follow") options.camera = CameraMode::Follow;
             else if (arg == "--follow-metro") { options.camera = CameraMode::Follow; options.followMetro = true; }
             else if (arg == "--no-post") options.noPost = true;
+            else if (arg == "--follow-bus") { options.camera = CameraMode::Follow; options.followBus = true; }
             else if (arg == "--camera")
             {
                 if (!next(value)) { options.error = "--camera needs a mode"; return false; }

@@ -69,6 +69,7 @@ add_executable(cna-city
     src/RoadNetwork.cpp
     src/City.cpp
     src/MetroNetwork.cpp
+    src/BusNetwork.cpp
     src/Pathfinder.cpp
     src/WorldState.cpp
     src/JobSystem.cpp

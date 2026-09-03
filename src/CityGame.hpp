@@ -147,6 +147,15 @@ namespace CnaCity
         std::size_t drawnProps_ = 0;
         std::size_t drawnParked_ = 0;
         std::size_t drawnTrainCars_ = 0;
+        std::size_t drawnBuses_ = 0;
+
+        /// Which half of the city the follow camera was asked for on the command line.
+        [[nodiscard]] Simulation::Focus FollowFocus() const
+        {
+            return options_.followMetro   ? Simulation::Focus::Metro
+                   : options_.followBus   ? Simulation::Focus::Bus
+                                          : Simulation::Focus::Anybody;
+        }
         int frameCount_ = 0;
         std::string rendererName_;
         std::string diagnostic_;

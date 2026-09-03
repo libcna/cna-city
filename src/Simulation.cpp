@@ -90,6 +90,9 @@ namespace CnaCity
         city_.Generate(config.city);
         metro_.Generate(city_, config.metroLines, config.city.seed);
         pathfinder_.Build(city_);
+        // After the pathfinder, because a bus route is a sequence of driving legs and it is laid
+        // out on the same road graph the traffic uses rather than on straight lines between stops.
+        buses_.Generate(city_, pathfinder_, config.busRoutes, config.city.seed);
 
         // The fleet is sized from the population rather than fixed: at the morning peak roughly a
         // sixth of the car-owning adults are on the road at once, and a fleet smaller than that
@@ -103,6 +106,7 @@ namespace CnaCity
         // at once is well past any peak this simulation produces.
         routes_.Reset(std::max<std::size_t>(256, static_cast<std::size_t>(config.agentCount) * 2 / 5));
         platformQueue_.assign(metro_.stations().size(), {});
+        stopQueue_.assign(buses_.stops().size(), {});
 
         clock_.Reset(config.startHour, config.timeScale);
         weather_.Reset(config.weather, config.city.seed ^ 0x9e37ULL);
@@ -284,17 +288,19 @@ namespace CnaCity
 
         // --- Mode choice --------------------------------------------------------------------
         //
-        // Three options, and the numbers below are the whole of the demo's mode-share model. It
-        // is intentionally legible rather than calibrated: the point is that the shares visibly
-        // move when the weather turns or the clock reaches the peak, not that they match a
-        // published survey.
+        // Four options -- walk, drive, bus, metro -- and the numbers below are the whole of the
+        // demo's mode-share model. It is intentionally legible rather than calibrated: the point
+        // is that the shares visibly move when the weather turns or the clock reaches the peak,
+        // not that they match a published survey.
+        //
+        // The bus takes the middle band on purpose. The underground is faster over a kilometre
+        // and its stations are a kilometre apart, so a trip of four hundred metres that happens to
+        // pass a station used to go down the stairs, ride one stop and come back up -- which is
+        // both slower than walking and the reason the shelters had nobody at them.
         const std::uint32_t bits = Hash(agent, decisionEpoch_);
         const float aversion = weather_.WalkingAversion();
         const bool commercial = IsCommercialDriver(agent);
         const bool hasCar = agents_.OwnsCar(agent) || commercial;
-
-        MetroNetwork::Route metroRoute;
-        const bool metroWorks = metro_.PlanRoute(from, target.doorway, metroRoute);
 
         bool drive = commercial;
         if (!drive && hasCar && straight > 400.0f)
@@ -311,14 +317,45 @@ namespace CnaCity
         std::uint32_t goalNode = DoorNodeOf(destination);
         TravelMode travelMode = TravelMode::Foot;
 
+        // Both public-transport planners are asked only when their answer could be used. They are
+        // not cheap -- each one searches a network of stops or stations and the routes through it
+        // -- and asking both for every trip in the city, including the ones already decided to be
+        // a car or a two-hundred-metre walk, cost most of a millisecond a tick at the peak for
+        // answers that were then thrown away.
+        MetroNetwork::Route metroRoute;
+        BusNetwork::Ride busRide;
+        const auto metroWorks = [&] {
+            return !drive && metro_.PlanRoute(from, target.doorway, metroRoute);
+        };
+        const auto busWorks = [&] {
+            return !drive && straight > 350.0f * aversion &&
+                   buses_.PlanRide(from, target.doorway, busRide);
+        };
+
         if (drive)
         {
             travelMode = TravelMode::Car;
         }
-        else if (metroWorks && straight > 480.0f * aversion)
+        else if (straight > 1400.0f && metroWorks())
         {
             // The metro leg replaces the middle of the trip: the route planned now is only as far
             // as the station entrance, and the walk at the far end is planned on arrival.
+            agents_.metroBoard[agent] = metroRoute.boardStation;
+            agents_.metroAlight[agent] = metroRoute.alightStation;
+            goalNode = metro_.stations()[metroRoute.boardStation].doorNode;
+        }
+        else if (busWorks())
+        {
+            // The bus sits in the gap the other three modes leave: too far to enjoy walking, too
+            // short or too far off the underground to be worth a station, and not worth a car for
+            // somebody who may not have one. It is the same shape of leg as the metro -- walk,
+            // wait, ride, walk -- and the second walk is planned when they get off.
+            agents_.busBoard[agent] = busRide.boardStop;
+            agents_.busAlight[agent] = busRide.alightStop;
+            goalNode = buses_.stops()[busRide.boardStop].node;
+        }
+        else if (straight > 480.0f * aversion && metroWorks())
+        {
             agents_.metroBoard[agent] = metroRoute.boardStation;
             agents_.metroAlight[agent] = metroRoute.alightStation;
             goalNode = metro_.stations()[metroRoute.boardStation].doorNode;
@@ -327,6 +364,8 @@ namespace CnaCity
         {
             agents_.metroBoard[agent] = kNoIndex;
             agents_.metroAlight[agent] = kNoIndex;
+            agents_.busBoard[agent] = kNoIndex;
+            agents_.busAlight[agent] = kNoIndex;
         }
 
         ReleaseRoute(agent);
@@ -696,6 +735,8 @@ namespace CnaCity
         walking_.clear();
         waiting_.clear();
         riding_.clear();
+        atStop_.clear();
+        onBus_.clear();
         std::uint32_t indoors = 0, driving = 0;
         for (std::uint32_t i = 0; i < agents_.size(); ++i)
         {
@@ -706,6 +747,8 @@ namespace CnaCity
                 case Mode::Driving:      ++driving; break;
                 case Mode::WaitingTrain: waiting_.push_back(i); break;
                 case Mode::Riding:       riding_.push_back(i); break;
+                case Mode::WaitingBus:   atStop_.push_back(i); break;
+                case Mode::OnBus:        onBus_.push_back(i); break;
             }
         }
         stats_.indoors = indoors;
@@ -713,6 +756,8 @@ namespace CnaCity
         stats_.walking = static_cast<std::uint32_t>(walking_.size());
         stats_.waitingTrain = static_cast<std::uint32_t>(waiting_.size());
         stats_.riding = static_cast<std::uint32_t>(riding_.size());
+        stats_.waitingBus = static_cast<std::uint32_t>(atStop_.size());
+        stats_.onBus = static_cast<std::uint32_t>(onBus_.size());
 
         // The activity histogram is for the HUD alone and costs a full pass over the population,
         // so it runs once per Step rather than once per movement sub-step.
@@ -793,6 +838,8 @@ namespace CnaCity
                     finalLeg = true;
                     if (agents_.metroBoard[agent] != kNoIndex)
                         target = metro_.stations()[agents_.metroBoard[agent]].entrance;
+                    else if (agents_.busBoard[agent] != kNoIndex)
+                        target = buses_.stops()[agents_.busBoard[agent]].position;
                     else if (agents_.targetBuilding[agent] != kNoIndex)
                         target = city_.buildings()[agents_.targetBuilding[agent]].doorway;
                     else
@@ -886,6 +933,26 @@ namespace CnaCity
                 agents_.speed[agent] = 0.0f;
                 agents_.waitTimer[agent] = 0.0f;
                 platformQueue_[station].push_back(agent);
+                continue;
+            }
+            if (agents_.busBoard[agent] != kNoIndex)
+            {
+                // Into the queue at the shelter. Above ground, so unlike a platform this is drawn
+                // by the ordinary pedestrian pass -- but they are standing still and facing the
+                // road, which is what a bus queue looks like from across the street.
+                const std::uint32_t stop = agents_.busBoard[agent];
+                ReleaseRoute(agent);
+                agents_.mode[agent] = static_cast<std::uint8_t>(Mode::WaitingBus);
+                const BusStop& shelter = buses_.stops()[stop];
+                const Vec2 facing = Normalized(shelter.kerb - shelter.position);
+                const Vec2 along = Perp(facing);
+                agents_.position[agent] =
+                    shelter.position + along * ((HashFloat(agent, 0x3C11u) * 2.0f - 1.0f) * 5.5f) +
+                    facing * (HashFloat(agent, 0x3C12u) * 1.6f - 0.8f);
+                agents_.heading[agent] = Heading(facing);
+                agents_.speed[agent] = 0.0f;
+                agents_.waitTimer[agent] = 0.0f;
+                stopQueue_[stop].push_back(agent);
                 continue;
             }
             FinishTrip(agent);
@@ -1040,6 +1107,142 @@ namespace CnaCity
         }
     }
 
+    void Simulation::PlanWalkFrom(std::uint32_t agent, std::uint32_t startNode)
+    {
+        const std::uint32_t destination = agents_.targetBuilding[agent];
+        ReleaseRoute(agent);
+        if (destination == kNoIndex) return;
+        scratchPath_.clear();
+        const std::uint32_t length =
+            pathfinder_.FindPath(startNode, DoorNodeOf(destination), TravelMode::Foot, scratchPath_);
+        if (length < 2) return;
+        const std::uint32_t slot = routes_.Acquire();
+        if (slot == kNoIndex) return;
+        const std::uint32_t stored = std::min<std::uint32_t>(length, kMaxPathNodes);
+        std::copy(scratchPath_.begin(), scratchPath_.begin() + stored, routes_.At(slot));
+        agents_.pathSlot[agent] = slot;
+        agents_.pathLength[agent] = static_cast<std::uint16_t>(stored);
+        agents_.pathCursor[agent] = 0;
+    }
+
+    bool Simulation::TrafficMayProceed(Vec2 at, Vec2 ahead) const
+    {
+        const RoadNetwork& roads = city_.roads();
+        const std::uint32_t node = roads.FindNearestNode(ahead);
+        if (node == kNoIndex) return true;
+        const RoadNode& junction = roads.nodes()[node];
+        if (!junction.signalised) return true;
+        // Only when the junction is actually the next thing on the road. Otherwise a bus halfway
+        // down a long block would be held by a signal a hundred metres away.
+        if (DistanceSq(junction.position, ahead) > 16.0f * 16.0f) return true;
+        // Already in the junction: stopping there is worse than crossing it.
+        if (DistanceSq(junction.position, at) < 7.0f * 7.0f) return true;
+
+        // The approach is the arm the vehicle is coming *from*, so the incidence whose outgoing
+        // heading points back the way it came.
+        const Vec2 travel = Normalized(ahead - at);
+        float best = -2.0f;
+        std::uint32_t slot = 0;
+        for (std::uint32_t k = 0; k < junction.incidentCount; ++k)
+        {
+            const Vec2 arm = FromHeading(roads.incidenceBegin(node)[k].heading);
+            const float alignment = -Dot(arm, travel);
+            if (alignment > best) { best = alignment; slot = k; }
+        }
+        return traffic_.IsGreen(node, slot);
+    }
+
+    void Simulation::StepBusPassengers(float dt)
+    {
+        const std::vector<BusRoute>& routes = buses_.routes();
+        std::vector<Bus>& fleet = buses_.mutableBuses();
+
+        // --- Boarding ---------------------------------------------------------------------------
+        for (std::uint32_t b = 0; b < fleet.size(); ++b)
+        {
+            Bus& bus = fleet[b];
+            if (bus.dwellRemaining <= 0.0f) continue;
+            const BusRoute& route = routes[bus.route];
+            // While dwelling, `nextStop` has already advanced past the one the bus is standing at.
+            const std::uint32_t servedIndex =
+                (bus.nextStop + static_cast<std::uint32_t>(route.stops.size()) - 1u) %
+                static_cast<std::uint32_t>(route.stops.size());
+            const std::uint32_t stop = route.stops[servedIndex];
+
+            std::vector<std::uint32_t>& queue = stopQueue_[stop];
+            if (queue.empty()) continue;
+
+            std::size_t write = 0;
+            for (std::size_t k = 0; k < queue.size(); ++k)
+            {
+                const std::uint32_t agent = queue[k];
+                if (agents_.mode[agent] != static_cast<std::uint8_t>(Mode::WaitingBus))
+                    continue;   // already gone; drop from the queue
+                const std::uint32_t alight = agents_.busAlight[agent];
+                if (buses_.RouteBetween(stop, alight) == bus.route && bus.onboard < bus.capacity)
+                {
+                    agents_.mode[agent] = static_cast<std::uint8_t>(Mode::OnBus);
+                    agents_.busVehicle[agent] = b;
+                    agents_.busBoard[agent] = kNoIndex;
+                    ++bus.onboard;
+                    continue;
+                }
+                queue[write++] = agent;
+            }
+            queue.resize(write);
+        }
+
+        // --- The give-up rule --------------------------------------------------------------------
+        //
+        // The same rule the platforms have and for the same reason: nothing in this simulation may
+        // wait forever. A bus every few minutes is a property of code that can change, and five
+        // minutes at a stop is where a real person starts walking.
+        for (std::uint32_t agent : atStop_)
+        {
+            agents_.waitTimer[agent] += dt;
+            if (agents_.waitTimer[agent] < 330.0f) continue;
+            agents_.waitTimer[agent] = 0.0f;
+            agents_.busBoard[agent] = kNoIndex;
+            agents_.busAlight[agent] = kNoIndex;
+            agents_.mode[agent] = static_cast<std::uint8_t>(Mode::Walking);
+            PlanWalkFrom(agent, city_.roads().FindNearestNode(agents_.position[agent]));
+        }
+
+        // --- Riding and alighting ----------------------------------------------------------------
+        for (std::uint32_t agent : onBus_)
+        {
+            const std::uint32_t busIndex = agents_.busVehicle[agent];
+            if (busIndex == kNoIndex || busIndex >= fleet.size())
+            {
+                agents_.mode[agent] = static_cast<std::uint8_t>(Mode::Indoors);
+                continue;
+            }
+            Bus& bus = fleet[busIndex];
+            const BusRoute& route = routes[bus.route];
+            Vec2 at;
+            float heading = 0.0f;
+            buses_.Placement(bus, at, heading);
+            agents_.position[agent] = at;
+            agents_.heading[agent] = heading;
+            agents_.speed[agent] = bus.speed;
+
+            if (bus.dwellRemaining <= 0.0f) continue;
+            const std::uint32_t servedIndex =
+                (bus.nextStop + static_cast<std::uint32_t>(route.stops.size()) - 1u) %
+                static_cast<std::uint32_t>(route.stops.size());
+            const std::uint32_t stop = route.stops[servedIndex];
+            if (stop != agents_.busAlight[agent]) continue;
+
+            if (bus.onboard > 0) --bus.onboard;
+            agents_.busVehicle[agent] = kNoIndex;
+            agents_.busAlight[agent] = kNoIndex;
+            agents_.position[agent] = buses_.stops()[stop].position;
+            agents_.speed[agent] = 0.0f;
+            agents_.mode[agent] = static_cast<std::uint8_t>(Mode::Walking);
+            PlanWalkFrom(agent, buses_.stops()[stop].node);
+        }
+    }
+
     void Simulation::StepMovement(float dt)
     {
         System::Diagnostics::Stopwatch watch;
@@ -1048,6 +1251,13 @@ namespace CnaCity
         metro_.Step(dt);
         traffic_.StepSignals(dt);
         stats_.metroMs += ElapsedMs(watch);
+
+        watch.Restart();
+        // Buses obey the same signals the cars do, asked the same question: may a vehicle here,
+        // heading there, cross the junction it is approaching? Modelling the lights a second time
+        // for the buses would be two models of one thing that agree until somebody edits one.
+        buses_.Step(city_, dt, [this](Vec2 at, Vec2 ahead) { return TrafficMayProceed(at, ahead); });
+        stats_.busMs += ElapsedMs(watch);
 
         watch.Restart();
         RebuildCrowdGrid();
@@ -1071,6 +1281,10 @@ namespace CnaCity
         watch.Restart();
         StepMetroPassengers(dt);
         stats_.metroMs += ElapsedMs(watch);
+
+        watch.Restart();
+        StepBusPassengers(dt);
+        stats_.busMs += ElapsedMs(watch);
     }
 
     void Simulation::Step(float simulatedSeconds)
@@ -1078,7 +1292,7 @@ namespace CnaCity
         System::Diagnostics::Stopwatch watch;
         stats_.tripsStarted = 0;
         stats_.routeFailures = 0;
-        stats_.walkMs = stats_.crowdMs = stats_.trafficMs = stats_.metroMs = 0.0;
+        stats_.walkMs = stats_.crowdMs = stats_.trafficMs = stats_.metroMs = stats_.busMs = 0.0;
 
         simulatedSeconds_ += static_cast<double>(simulatedSeconds);
         decisionEpoch_ = static_cast<std::uint32_t>(simulatedSeconds_ * 2.0);
@@ -1176,29 +1390,35 @@ namespace CnaCity
         return text;
     }
 
-    std::uint32_t Simulation::PickInterestingAgent(std::uint32_t hint, bool metro) const
+    std::uint32_t Simulation::PickInterestingAgent(std::uint32_t hint, Focus focus) const
     {
         // Somebody on foot, or nobody. Falling back to a uniformly random citizen was the first
         // version and it is worse than useless: before the first tick the list of people outdoors
         // is empty, so the follow camera's opening shot was reliably a random person asleep in a
         // building, filmed from inside the wall.
-        if (metro)
+        const std::uint32_t roll = Hash(hint, decisionEpoch_);
+        if (focus == Focus::Metro)
         {
-            if (!riding_.empty()) return riding_[Hash(hint, decisionEpoch_) % riding_.size()];
-            if (!waiting_.empty()) return waiting_[Hash(hint, decisionEpoch_) % waiting_.size()];
+            if (!riding_.empty()) return riding_[roll % riding_.size()];
+            if (!waiting_.empty()) return waiting_[roll % waiting_.size()];
+        }
+        if (focus == Focus::Bus)
+        {
+            if (!onBus_.empty()) return onBus_[roll % onBus_.size()];
+            if (!atStop_.empty()) return atStop_[roll % atStop_.size()];
         }
         if (walking_.empty()) return kNoIndex;
-        return walking_[Hash(hint, decisionEpoch_) % walking_.size()];
+        return walking_[roll % walking_.size()];
     }
 
     std::size_t Simulation::MemoryBytes() const
     {
         const std::size_t agentBytes = agents_.size() *
             (sizeof(Vec2) + sizeof(float) * 4 + sizeof(std::uint8_t) * 4 +
-             sizeof(std::uint32_t) * 8 + sizeof(std::uint16_t) * 6);
+             sizeof(std::uint32_t) * 11 + sizeof(std::uint16_t) * 6);
         return agentBytes + routes_.bytes() + pathfinder_.cacheBytes() +
                city_.buildings().size() * sizeof(Building) +
                city_.props().size() * sizeof(Prop) +
-               traffic_.vehicles().size() * sizeof(Vehicle);
+               traffic_.vehicles().size() * sizeof(Vehicle) + buses_.MemoryBytes();
     }
 }
