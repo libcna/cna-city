@@ -685,7 +685,10 @@ namespace CnaCity
                 "asphalt", "pavement", "grass", "glass tower", "concrete office", "brick apartment",
                 "render house", "metal shed", "flat roof", "roof tile", "road marking", "foliage",
                 "bark", "street furniture", "vehicle body", "vehicle glass", "person",
-                "metro tunnel", "metro rail", "tunnel light"};
+                "metro tunnel", "metro floor", "metro rail", "tunnel light"};
+            static_assert(kCityMaterialCount == 21,
+                          "add the new material to kNames -- a report that prints (null) for a "
+                          "material is a report nobody trusts the rest of");
             for (int m = 0; m < kCityMaterialCount; ++m)
                 if (perMaterial[m] > 0)
                     std::printf("  geometry: %-18s %8d triangles\n", kNames[m], perMaterial[m]);

@@ -149,6 +149,20 @@ namespace CnaCity
         std::size_t drawnTrainCars_ = 0;
         std::size_t drawnBuses_ = 0;
 
+        /// True for the materials that exist only inside the metro tunnels.
+        ///
+        /// Eleven metres of earth is between them and everything else, so from any camera above
+        /// ground they are invisible and they cast nothing -- but the tunnels run through most of
+        /// the city's chunks, so every pass was paying four extra draw calls per visible chunk,
+        /// four times over in the shadow cascades, for geometry that could not appear.
+        [[nodiscard]] static bool IsUnderground(int material)
+        {
+            return material == static_cast<int>(CityMaterial::MetroTunnel) ||
+                   material == static_cast<int>(CityMaterial::MetroFloor) ||
+                   material == static_cast<int>(CityMaterial::MetroRail) ||
+                   material == static_cast<int>(CityMaterial::TunnelLight);
+        }
+
         /// Which half of the city the follow camera was asked for on the command line.
         [[nodiscard]] Simulation::Focus FollowFocus() const
         {

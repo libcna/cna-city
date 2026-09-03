@@ -132,22 +132,23 @@ On an AMD Radeon 780M with 16 threads, at a hundred thousand citizens:
 | | |
 |---|---|
 | City generation, from one seed | **24 ms** — 204 km of road, 1 072 blocks, 11 808 buildings |
-| Simulation tick, mean / p99 | **2.12 ms / 3.52 ms** |
-| Frame, street level, 1600x900 high | **10.2 ms (98 fps)** |
-| Frame, city overview, all four shadow cascades | **13.9 ms (72 fps)** |
+| Simulation tick, mean / p99 | **2.54 ms / 4.08 ms** |
+| Of which the metro and the buses | **0.04 ms and 0.19 ms** |
+| Frame, street level, 1600x900 high | **11.5 ms (87 fps)** |
+| Frame, city overview, all four shadow cascades | **17.5 ms (57 fps)** |
 | Total resident memory | **under 65 MB** |
 
-**A hundred times the agents costs 8.2 times the tick, not a hundred.** The route cache's hit rate
-*rises* with population — 10% at a thousand agents, 35% at a hundred thousand — because citizens do
+**A hundred times the agents costs 8.0 times the tick, not a hundred.** The route cache's hit rate
+*rises* with population — 12% at a thousand agents, 39% at a hundred thousand — because citizens do
 not have random destinations, they go to the same few thousand doorways.
 
 And which half of the program dominates depends on where the camera is: from four hundred metres up
 the shadow cascades put the renderer ahead, and at street level the simulation is the larger of the
-two even with almost nothing on screen. The whole static city is 220 000 triangles.
+two even with almost nothing on screen. The whole static city is 246 000 triangles.
 
 What CNA could not do here is written down as plainly as what it could, in
 [`CNA-FINDINGS.md`](CNA-FINDINGS.md) — seven capability gaps, each checked against CNA's own
-source before it was written down, and three things that looked like engine defects and turned
+source before it was written down, and four things that looked like engine defects and turned
 out to be this program's mistakes. Every defect found on the way — including the four that
 produced a city where nobody ever arrived anywhere, the one that made every road invisible, and
 the one that quietly removed every roof — is in [`ARCHITECTURE.md`](ARCHITECTURE.md), with the

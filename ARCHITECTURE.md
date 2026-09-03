@@ -160,8 +160,11 @@ weights are both zero on a clear day. See [`CNA-FINDINGS.md`](CNA-FINDINGS.md) A
 
 ## 6. What CNA could not do here
 
-Four boundaries were hit that are properties of the engine rather than of this program, and all are
-worth stating because a demo that only reports successes is not measuring anything.
+Three boundaries were hit that are properties of the engine rather than of this program, and all
+are worth stating because a demo that only reports successes is not measuring anything. A fourth
+looked like one for a day -- the underground lit by an eight-a.m. sky -- and was not: CNA's cascades
+do place the light far enough back for the ground to occlude the sun, and this program is the thing
+that does not draw the ground into them. That is `CNA-FINDINGS.md` C4.
 
 **Thousands of street lights at night are not real lights.** `ClusteredForwardEffect` is the layer's
 own PBR effect and it is what supports many punctual lights; `PbrEffect` is what supports the
@@ -169,15 +172,6 @@ texture set — albedo, normal, metallic-roughness, emissive, occlusion. They ar
 and a surface gets one of them. A city needs the textures far more than it needs the lights, so the
 lamps here are emissive geometry plus bloom, and the pools of light they should cast on the road do
 not exist. Making both available to one surface is a change inside CNA, not one a game can make.
-
-**Nothing in the pipeline can express a roof between the camera and the sun.** Four shadow cascades
-fitted to the view frustum are fitted, underground, to a frustum that is entirely underground, and
-there is nothing above it to cast into them. So a tunnel at eight in the morning is lit by the
-morning: sun, fill, ambient and the image-based light all arrive through a metre of concrete. The
-fix here is to gate all four on the camera's depth, which is correct for this program -- the only
-enclosed volume in the city is the underground -- and would not be for one with interiors. A general
-answer needs either a shadow-casting geometry pass that includes the ground, or per-object ambient,
-and CNA offers neither.
 
 **There is no attribute slot for a per-instance colour.** CNA's instance stream occupies vertex
 attribute locations 12 to 15 and the stock lit shaders use 0 to 11 — sixteen in total, which is
@@ -192,7 +186,7 @@ generation, which runs once over a hundred thousand agents and is where this pro
 the wrong shape for five loops that run thirty times a second, so the tick uses a persistent pool
 instead.
 
-The full list, with what was checked to establish each one -- and the three things that looked like
+The full list, with what was checked to establish each one -- and the four things that looked like
 engine defects and turned out to be this program's own mistakes -- is in
 [`CNA-FINDINGS.md`](CNA-FINDINGS.md).
 
@@ -206,21 +200,27 @@ CNA's `OPENGLES3` renderer. Release build, ccache, GCC 14.2.
 Six simulated hours from 06:30 — the morning peak, which is the only interesting part of the day —
 at 30 ticks per second of wall clock and a time scale of 60.
 
-| agents | setup | mean | p99 | worst | decide | walk | crowd | traffic | memory | peak travelling |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 000 | 19 ms | 0.26 ms | 0.35 ms | 6.51 ms | 0.01 | 0.02 | 0.10 | 0.13 | 7.6 MB | 111 |
-| 10 000 | 18 ms | 0.54 ms | 0.89 ms | 2.70 ms | 0.05 | 0.17 | 0.13 | 0.15 | 9.2 MB | 917 |
-| 50 000 | 23 ms | 1.56 ms | 3.53 ms | 10.28 ms | 0.23 | 0.53 | 0.32 | 0.27 | 16.1 MB | 4 527 |
-| 100 000 | 27 ms | 2.12 ms | 3.52 ms | 12.06 ms | 0.40 | 0.57 | 0.40 | 0.36 | 24.7 MB | 9 255 |
+| agents | setup | mean | p99 | worst | decide | walk | crowd | traffic | metro | bus | memory | peak travelling |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 000 | 18 ms | 0.32 ms | 0.41 ms | 2.93 ms | 0.01 | 0.02 | 0.11 | 0.14 | 0.00 | 0.04 | 7.7 MB | 98 |
+| 10 000 | 22 ms | 0.64 ms | 1.05 ms | 3.66 ms | 0.06 | 0.17 | 0.13 | 0.17 | 0.00 | 0.06 | 9.3 MB | 841 |
+| 50 000 | 26 ms | 1.66 ms | 2.74 ms | 6.86 ms | 0.23 | 0.50 | 0.32 | 0.27 | 0.02 | 0.12 | 16.7 MB | 4 087 |
+| 100 000 | 31 ms | 2.54 ms | 4.08 ms | 8.75 ms | 0.43 | 0.62 | 0.44 | 0.40 | 0.04 | 0.19 | 25.8 MB | 8 564 |
 
-**A hundred times the agents costs 8.2 times the tick.** That is not an accident and it is the most
-interesting number the program produces: the route cache's hit rate *rises* with population — 8% at
-a thousand agents, 23% at ten thousand, 32% at fifty thousand, 38% at a hundred thousand — because
-citizens do not have uniformly random destinations. They go to the same few thousand doorways, and
-the more of them there are the more often somebody has already made the trip -- 10% at a thousand
-agents, 26% at ten thousand, 33% at fifty thousand, 35% at a hundred thousand. The cost that scales
-linearly is the movement of the people actually outdoors, and at the morning peak that is 9% of the
-population rather than all of it.
+**A hundred times the agents costs 8.0 times the tick.** That is not an accident and it is the most
+interesting number the program produces: the route cache's hit rate *rises* with population -- 12%
+at a thousand agents, 30% at ten thousand, 37% at fifty thousand, 39% at a hundred thousand --
+because citizens do not have uniformly random destinations. They go to the same few thousand
+doorways, and the more of them there are the more often somebody has already made the trip. The
+cost that scales linearly is the movement of the people actually outdoors, and at the morning peak
+that is 9% of the population rather than all of it.
+
+The two transport networks are the cheapest things in the tick and stay that way: the metro is
+0.04 ms and the buses 0.19 ms at a hundred thousand citizens, against 0.40 ms for the cars. Nineteen
+trains and ninety-four buses is a hundred and thirteen vehicles, and the passengers on them cost
+one pass over the few hundred people actually aboard. The buses cost five times the metro because
+they have five times the stops and their route planner searches every stop within five hundred
+metres of a trip's origin rather than the nearest station.
 
 The worst-case tick is three to eight times the mean. It is the morning peak's burst of route
 planning, which is why the planner has a per-pass budget of 320 -- a number taken from the measured
@@ -251,14 +251,23 @@ misses is not eight times the work.
 1600 × 900, high quality, `--agents 100000`, all four shadow cascades, HDR with ACES, bloom and
 FXAA.
 
-Taken at 07:30 on a city that has been running long enough to have 15 000 people at work, 2 800 on
-foot, 1 900 driving at a mean 2.1 m/s with 177 of them queuing, and 550 on the underground.
+Taken at 09:00 on a city that has been running long enough to have 41 000 people at work, 3 000 on
+foot, 1 200 driving, 130 on the underground and 200 on the buses.
 
 | view | frame | simulation | draw | shadows | prepass | scene | draws | triangles |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| city overview, 400 m up | 13.9 ms (72 fps) | 2.0 ms | 12.8 ms | 5.0 ms | — | 5.0 ms | 537 | 181 k |
-| street level, morning rush | 10.2 ms (98 fps) | 2.0 ms | 7.1 ms | 1.7 ms | 0.8 ms | 1.5 ms | 187 | 43 k |
-| a junction with the lights on | 5.1 ms (195 fps) | 0.5 ms | 4.3 ms | 1.2 ms | 0.5 ms | 1.0 ms | 174 | 40 k |
+| city overview, 400 m up | 17.5 ms (57 fps) | 5.8 ms | 13.7 ms | 5.8 ms | — | 6.2 ms | 640 | 197 k |
+| street level, morning rush | 11.5 ms (87 fps) | 6.1 ms | 7.7 ms | 1.6 ms | 0.7 ms | 1.5 ms | 210 | 45 k |
+
+These are the best of four runs each. The machine was not otherwise idle while they were taken and
+the spread between runs was two to three milliseconds, which is larger than several of the
+differences this table would otherwise invite you to read into it.
+
+The underground is skipped entirely by every pass whenever the camera is above ground -- both the
+scene and all four shadow cascades. Eleven metres of earth is between the tunnels and everything
+else, so they cannot appear and they shade nothing, but they run through most of the city's chunks
+and were costing four extra draw calls per visible chunk, four times over in the cascades. Removing
+them took three milliseconds off the overview.
 
 Ambient occlusion switches itself off above roof height, which is why the overview has no prepass
 line: it is a contact effect, and from four hundred metres up one screen pixel is several metres of
@@ -272,7 +281,7 @@ The simulation and the draw are serial here, and which of them dominates depends
 the camera is: from four hundred metres up the four shadow cascades and the visible chunk count put
 the renderer ahead, and at street level the simulation is the larger of the two even though almost
 nothing is on screen. **That is the answer this demo was built to get**, and it is not the one a
-graphics demo would expect: the static city is 220 000 triangles in 121 chunks, which a 780M draws
+graphics demo would expect: the static city is 246 000 triangles in 121 chunks, which a 780M draws
 without noticing, and the cost is in the hundred thousand daily routines behind it.
 
 The frame time reported here is the whole frame, taken from the harness. Timing only the body of

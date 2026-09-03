@@ -214,6 +214,27 @@ unrepresentable rather than merely fixed.
 The convention deserves to be repeated in `MeshBuilder`-shaped documentation wherever geometry is
 authored, because the failure is silent in both directions.
 
+### C4. The underground being lit by the morning sky was this program, not the engine.
+
+An eight-a.m. metro tunnel rendered as a uniformly lit white tube, and the first two explanations I
+wrote for it were both wrong. Recorded because both are the kind of thing that gets filed as an
+engine gap:
+
+**"The cascades cannot express a roof."** They can. `CascadedShadowMap::update` places the light's
+eye twice the cascade radius back from the frustum's bounding sphere, so the ground above a camera
+in a tunnel is inside the light's depth range and would occlude the sun -- if the game drew it into
+the caster pass. This one does not: it skips grass, asphalt and pavement there, because they are
+half the city's triangles and cast nothing useful anywhere else. That is a trade this program made,
+and the price is that it has to gate the sun on the camera's depth instead.
+
+**"There is no way to give one surface a different ambient."** `PbrEffect`'s ambient is effect
+state, and this renderer applies the effect once per material anyway, so the tunnel materials could
+carry their own. What actually caught me is smaller and is documented: `setImageBasedLightEXT` says
+in its own header comment that an environment **replaces** the flat ambient rather than adding to
+it, and `PbrEffect::Apply` zeroes `ambientColor` whenever the bundle is valid. So the tunnel ambient
+this program sets does nothing at all while the sky environment is bound, and the only thing that
+was ever dimming the underground was `ImageBasedLightEXT::Intensity`. The code says so now.
+
 ### C2. `RenderPipelineSettings` defaults are not the problem.
 
 Checked, member by member, in the header: every optional pass starts off — `hdrEnabled_`,

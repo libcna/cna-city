@@ -809,6 +809,14 @@ namespace CnaCity
         const Vector3 daylightAmbient = AmbientColor();
         // Underground the ambient does not go to zero, it goes to what the tunnel's own light
         // strips bounce off the walls -- a warm, very dim fill rather than the sky's blue one.
+        //
+        // This only reaches the frame when there is no environment. `setImageBasedLightEXT` says
+        // in its own header that an environment *replaces* the flat ambient rather than adding to
+        // it, and `PbrEffect::Apply` zeroes the ambient colour whenever the bundle is valid --
+        // both terms stand for the same light, so summing them would count it twice. So on a
+        // machine where the environment built, the thing actually dimming the underground is
+        // `ImageBasedLightEXT::Intensity` above, and this is the fallback path's version of the
+        // same decision.
         const Vector3 tunnelAmbient(0.0225f, 0.0202f, 0.0168f);
         const Vector3 ambient(
             daylightAmbient.X * skyReach + tunnelAmbient.X * undergroundLevel_,
@@ -1201,6 +1209,9 @@ namespace CnaCity
                         m == static_cast<int>(CityMaterial::Asphalt) ||
                         m == static_cast<int>(CityMaterial::Pavement))
                         continue;
+                    // Nor does anything eleven metres underground, in either direction: the sun
+                    // does not reach it and it shades nothing that the sun does reach.
+                    if (IsUnderground(m)) continue;
                     if (chunk.meshes[m] != nullptr) chunk.meshes[m]->Draw(device);
                 }
             }
@@ -1239,7 +1250,10 @@ namespace CnaCity
             {
                 const GeometryChunk& chunk = geometry_.chunks()[index];
                 for (int m = 0; m < kCityMaterialCount; ++m)
+                {
+                    if (IsUnderground(m) && camera_.position.Y > 1.0f) continue;
                     if (chunk.meshes[m] != nullptr) chunk.meshes[m]->Draw(device);
+                }
             }
             prepass_->end();
         }
@@ -1283,6 +1297,7 @@ namespace CnaCity
         {
             const Material& material = materials_.Get(static_cast<CityMaterial>(m));
             if (material.albedo == nullptr) continue;
+            if (IsUnderground(m) && camera_.position.Y > 1.0f) continue;
             bool applied = false;
             for (std::uint32_t index : visibleChunks_)
             {
