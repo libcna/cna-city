@@ -178,7 +178,7 @@ subdirectory is added.
 
 ## C. Not CNA. Recorded so nobody chases them into the engine.
 
-### C1. The face winding convention — CNA documents it, this program had it backwards. Twice.
+### C1. The face winding convention — CNA documents it, this program had it backwards. Three times.
 
 `modules/graphics/examples/frontface_winding_test.cpp` states the contract from the FNA source
 rather than from any renderer's behaviour: under `RasterizerState::CullCounterClockwise`, **a
@@ -187,7 +187,7 @@ triangle that appears clockwise on screen is the front face**, and each cull enu
 
 An upward-facing surface therefore has to be wound so its winding normal points **down**. Writing
 it the other way — which is what "counter-clockwise is front-facing" leads you to write — produces
-a surface visible only from underneath. It cost two defects here and neither announced itself:
+a surface visible only from underneath. It cost three defects here and none of them announced itself:
 
 - every carriageway in the city was back-facing, so what showed through was the ground plane: a
   strip of grass down the middle of every street, with the lamp posts and street trees correctly
@@ -195,10 +195,24 @@ a surface visible only from underneath. It cost two defects here and neither ann
 - every flat roof was missing, which is far harder to see — from four hundred metres up you look
   *into* the buildings, whose walls are culled from the inside, and what you get is the pavement
   between them. It reads as a roof. It survived a dozen aerial screenshots and was only found by
-  tinting the roof material magenta and looking again.
+  tinting the roof material magenta and looking again;
+- and then the whole metro, in a way the first two do not prepare you for. The rule flips sign with
+  which side of a surface you stand on, so a *ceiling* — correct when its winding normal points up —
+  is the mirror image of a floor, and every ceiling in the tunnel was written as though it were a
+  floor. Worse, mirroring a correct quad about an axis produces an incorrect one, so the two sides
+  of every tunnel, the platform edge and the wall opposite it, and one of the two end panels were
+  each wound the wrong way *because their partner was right*. Four of the six faces of every tunnel
+  were inside out and the symptom was a passenger on a train seeing the city through the wall.
 
-The engine's behaviour is correct and documented. The lesson is that the convention deserves to be
-repeated in `MeshBuilder`-shaped documentation, because the failure is silent in both directions.
+The engine is not at fault in any of the three, but the third says something about the shape of the
+mistake: it is not a fact you learn once. It has a sign that depends on which side of the surface
+the viewer is on, and every mirrored copy flips it. The fix here was to stop writing vertex orders
+at all — `AddFacet` in `CityGeometry.cpp` takes a point known to be inside the enclosed space and
+derives the winding and the shading normal from it, which makes the class of mistake
+unrepresentable rather than merely fixed.
+
+The convention deserves to be repeated in `MeshBuilder`-shaped documentation wherever geometry is
+authored, because the failure is silent in both directions.
 
 ### C2. `RenderPipelineSettings` defaults are not the problem.
 

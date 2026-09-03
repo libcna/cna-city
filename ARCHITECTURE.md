@@ -87,12 +87,29 @@ Four simulation defects are recorded in the source:
 | Total gridlock, again | Signalising every junction whose highest class was a collector put lights on nine junctions in fourteen; queues on the short segments grew back past their own entrances | The fleet stopped draining between peaks |
 | Nobody ever went to work | A decision pass offers an eighth of the population and plans a few hundred; every other candidate had its "already commuted today" bit set anyway | 99 000 of 100 000 citizens still at home at half past eight, and staying there all day |
 | Half the city stopped deciding | The decision stride cycled on the tick counter, which was correct only while decisions ran on every tick; once they moved onto simulated time the sequence became 0, 2, 4, 6 and the four odd strides were never selected | The population on foot at the peak fell from six thousand to two -- a change that looks like tuning |
+| Buses carried nobody | `VehicleKind::Bus` was a body shape in the fleet mix, handed to one private commuter in twenty-five | Four hundred citizens a day driving a twelve-metre bus to work alone, past shelters that no service called at |
+| The follow camera could not keep up | It eased toward its target with a 0.28 s half-life of *real* time while the world runs at sixty times real time | A subject on a 21 m/s train sat five hundred metres ahead of the lens: half a kilometre of empty tunnel with a train the size of a pixel at the end of it |
 
 The movement integrator now sub-steps at a fixed half second regardless of the clock, junctions are
 signalised only where three arterial arms meet (120 of 1 476), and a vehicle that has not moved for
 four simulated minutes gives up and is counted. **That count is reported rather than hidden**: a
 gridlock give-up rate that climbs is a real result about the network, and burying it would defeat
 the purpose of the program.
+
+**Public transport is two networks with one shape.** `MetroNetwork` and `BusNetwork` are separate
+files that do the same four things: lay out stops, thread routes through them, run vehicles along
+those routes with a trapezoidal speed profile and a dwell, and answer "can you get me from here to
+there". Passengers use them through the same four-state sequence -- walk, queue, ride, walk -- with
+the second walk planned on arrival rather than up front, which is what lets a leg be replanned
+without a multi-leg route structure. Both refuse trips that need a change, and for the same reason:
+a passenger whose plan needs a second vehicle waits for one that by construction is never going to
+serve their destination, and the queue never drains. Both have a give-up timer for the same reason
+again -- nothing in this simulation may wait forever.
+
+The two differ where the city does. The metro runs on its own alignment and ignores the surface
+entirely; the buses run on the road graph, are placed in the kerbside lane of whatever class of
+road they are on, and stop at the same signals the cars do. They are not in the car-following
+stream, which is stated as a limitation in [`plan.md`](plan.md) rather than left to be discovered.
 
 ## 5. Rendering
 
@@ -143,7 +160,7 @@ weights are both zero on a clear day. See [`CNA-FINDINGS.md`](CNA-FINDINGS.md) A
 
 ## 6. What CNA could not do here
 
-Two boundaries were hit that are properties of the engine rather than of this program, and both are
+Four boundaries were hit that are properties of the engine rather than of this program, and all are
 worth stating because a demo that only reports successes is not measuring anything.
 
 **Thousands of street lights at night are not real lights.** `ClusteredForwardEffect` is the layer's
@@ -152,6 +169,15 @@ texture set — albedo, normal, metallic-roughness, emissive, occlusion. They ar
 and a surface gets one of them. A city needs the textures far more than it needs the lights, so the
 lamps here are emissive geometry plus bloom, and the pools of light they should cast on the road do
 not exist. Making both available to one surface is a change inside CNA, not one a game can make.
+
+**Nothing in the pipeline can express a roof between the camera and the sun.** Four shadow cascades
+fitted to the view frustum are fitted, underground, to a frustum that is entirely underground, and
+there is nothing above it to cast into them. So a tunnel at eight in the morning is lit by the
+morning: sun, fill, ambient and the image-based light all arrive through a metre of concrete. The
+fix here is to gate all four on the camera's depth, which is correct for this program -- the only
+enclosed volume in the city is the underground -- and would not be for one with interiors. A general
+answer needs either a shadow-casting geometry pass that includes the ground, or per-object ambient,
+and CNA offers neither.
 
 **There is no attribute slot for a per-instance colour.** CNA's instance stream occupies vertex
 attribute locations 12 to 15 and the stock lit shaders use 0 to 11 — sixteen in total, which is

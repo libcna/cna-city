@@ -286,6 +286,18 @@ namespace CnaCity
         agents_.targetBuilding[agent] = destination;
         agents_.activity[agent] = static_cast<std::uint8_t>(nextActivity);
 
+        // Every leg of the last trip is cleared here rather than on each of the paths that ends
+        // one, because there are five of those and two of them -- a driver, and a citizen whose
+        // route could not be found -- were leaving a stale boarding stop behind. The next time
+        // that citizen walked anywhere, the arrival handler saw the flag and put them on a
+        // platform for a station they were not going to.
+        agents_.metroBoard[agent] = kNoIndex;
+        agents_.metroAlight[agent] = kNoIndex;
+        agents_.metroTrain[agent] = kNoIndex;
+        agents_.busBoard[agent] = kNoIndex;
+        agents_.busAlight[agent] = kNoIndex;
+        agents_.busVehicle[agent] = kNoIndex;
+
         // --- Mode choice --------------------------------------------------------------------
         //
         // Four options -- walk, drive, bus, metro -- and the numbers below are the whole of the
@@ -379,6 +391,7 @@ namespace CnaCity
             agents_.activity[agent] = static_cast<std::uint8_t>(Activity::AtHome);
             agents_.waitTimer[agent] = 45.0f;
             agents_.metroBoard[agent] = kNoIndex;
+            agents_.busBoard[agent] = kNoIndex;
             return;
         }
 

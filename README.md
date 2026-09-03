@@ -32,8 +32,9 @@ answer is what it cannot.
 | **Pathfinding** | Three-level hierarchy: a district graph, a road-node A\* inside districts, and local steering. A shared path cache means a hundred thousand agents do not plan a hundred thousand paths. |
 | **Traffic** | Lane-based vehicles using the Intelligent Driver Model for car-following, with junction priority and signalised intersections. |
 | **Pedestrians** | Sidewalk lanes plus a spatial-hash crowd separation step, so a crossing at rush hour actually queues. |
-| **Traffic lights** | Phase-cycled intersections; vehicles and pedestrians both obey them. |
-| **Metro** | Underground lines with stations, timetabled trains, and agents that board, ride and alight as part of a commute. |
+| **Traffic lights** | Phase-cycled intersections; vehicles, buses and pedestrians all obey them. |
+| **Metro** | Underground lines with stations, timetabled trains, and agents that board, ride and alight as part of a commute. The tunnels, platforms, rails, lit strips and lit carriages are all there, and the follow camera can ride with a passenger. |
+| **Buses** | Fourteen routes of stops on the arterials and collectors, threaded through the road graph, with a fleet that dwells at every stop and citizens who queue at the shelter, board, ride and get off. |
 | **Day and night** | A 24-hour clock drives the sun, the sky's turbidity, the street lights, and the lit windows. |
 | **Weather** | Clear, overcast, rain, fog and snow, each changing the sky, the fog, the particle layer and the wetness of the road surface. |
 
@@ -76,7 +77,7 @@ Three things it deliberately does **not** use, and why — all three are in
 |---|---|
 | `1` | Free camera — fly anywhere. |
 | `2` | Orbit — circle the downtown skyline. |
-| `3` | **Follow a citizen** — pick one of the hundred thousand and watch their entire day: waking, walking to the metro, riding to work, lunch, the commute home. |
+| `3` | **Follow a citizen** — pick one of the hundred thousand and watch their entire day: waking, walking to the metro, riding to work, lunch, the commute home. `--follow-metro` and `--follow-bus` start it on somebody who is actually on public transport, which a random pick of a hundred thousand people almost never is. |
 | `4` | Street level — a fixed camera on a pavement corner, watching the city go past. |
 | `5` | Cinematic — a slow scripted sweep, for capture. |
 
@@ -85,8 +86,9 @@ routes of the citizens near the camera (also `--overlay roads`). `N` picks anoth
 follow and **`L` locks the one you have**, so the camera waits outside their door instead of moving
 on when they go inside — which is what makes following a whole day possible. `F` cycles the weather
 and pins it, `T`/`G` wind the clock, `[`/`]` change the time scale, `P` pauses, `F1` hides the HUD,
-`F2` bypasses the whole post-processing chain so you can see what it is doing, and `F3` turns on GPU
-timer queries and breaks the post chain down pass by pass.
+`F2` bypasses the whole post-processing chain so you can see what it is doing (also `--no-post`,
+which is the only way to capture the raw scene on a machine with nobody in front of it), and `F3`
+turns on GPU timer queries and breaks the post chain down pass by pass.
 
 ## Build
 
@@ -110,6 +112,9 @@ off by default in CNA and this demo is the reason to switch it on.
 ./build/cna-city --agents 25000 --quality medium
 ./build/cna-city --follow                   # start in "a day in the life"
 ./build/cna-city --time 21.5 --weather rain # night, wet streets
+./build/cna-city --follow-metro             # ride the underground with a commuter
+./build/cna-city --follow-bus               # the same, on the buses
+./build/cna-city --no-post                  # the raw scene, no tonemapper
 ./build/cna-city --bench --scales 1000,10000,100000 --csv bench.csv
 ```
 

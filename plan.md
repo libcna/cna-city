@@ -109,3 +109,55 @@ the lamps *are* real lights, `CNA-FINDINGS.md` says they cannot be. The findings
 - [x] **P8.1 Drivers teleport on arrival.** `FinishTrip` moves the agent to the destination doorway
   from wherever the car happened to be, which for a vehicle abandoned to gridlock is a jump across
   the city. *Accept:* a driver who ends up more than a short walk from the door walks the rest.
+
+---
+
+## P10 — The underground and the buses
+
+Added 2026-09-03, after "prosim vylepsi podzemi a autobusy". The two systems a passenger actually
+travels on were the two least finished things in the program: the underground was geometry you
+could see the city through, and the buses did not exist as a service at all.
+
+- [x] **P10.1 The tunnel shell leaks daylight.** Four independent defects, each found by rendering
+  the raw scene rather than by reading the code. (a) Every enclosed surface was hand-wound and a
+  mirrored copy of a correct quad is an incorrect one, so exactly one wall of each mirrored pair
+  was culled -- both tunnel sides, the platform edge, the wall opposite it and one end panel.
+  (b) A box per polyline segment plus a wider box per station has a joint at every station, and two
+  boxes meeting at an angle leave a wedge of open ground on the outside of the turn. (c) Geometry
+  lands in the chunk containing its centre and may stick out of it, and a 400 m tunnel segment in a
+  340 m chunk vanished whenever the chunk holding its middle left the frustum. (d) The sky lit the
+  tunnel, because the shadow cascades are fitted to a frustum that is entirely underground.
+  *Accept:* a screenshot from inside a train at any point on any line shows no sky and no city.
+  Verified at six positions on four lines.
+
+- [x] **P10.2 No caller may state a vertex order again.** `AddFacet` takes a point known to be
+  inside the space being enclosed and derives both the winding and the shading normal from it.
+  *Accept:* the winding trap that has now cost three separate bugs (roads, roofs, tunnels) is
+  unrepresentable in the underground's geometry.
+
+- [x] **P10.3 The follow camera cannot film a tunnel.** It stepped backwards along the subject's
+  heading, which at a bend is ten metres into the earth, and it eased in real seconds while the
+  world runs at sixty times real time -- so a subject on a 21 m/s train sat five hundred metres
+  ahead of the lens. *Accept:* `--follow-metro` shows a carriage flank, not a distant pixel.
+
+- [x] **P10.4 A bus was a body shape, not a service.** `VehicleKind::Bus` was handed to one private
+  commuter in twenty-five and `PropKind::BusShelter` was scattered where no bus stopped.
+  *Accept:* `BusNetwork` with stops, routes, a fleet and passengers; no private driver is ever
+  given a bus; every shelter drawn is one a service calls at.
+
+- [x] **P10.5 Nobody can watch a bus commute.** *Accept:* `--follow-bus`, the counterpart of
+  `--follow-metro`, and a `GETS OFF AT` line in the follow panel.
+
+- [x] **P10.6 The raw scene cannot be captured.** `F2` bypasses the post chain but there was no way
+  to ask for that from the command line, and "is that white wash the geometry or the tonemapper" is
+  the first question every lighting bug asks. *Accept:* `--no-post`. It is how P10.1(a) was pinned
+  down.
+
+### Known and not fixed
+
+- **Buses are not in the car-following stream.** They obey the signals but do not queue behind
+  cars, and cars do not queue behind them. Putting them in `Traffic` means giving each one a driver
+  agent out of the population, which would distort every demographic number on the HUD; the honest
+  alternative is a second vehicle class in the IDM arrays, and that is a larger change than this
+  round of work. What is visible from the pavement -- a bus stopping at a red, pulling in, dwelling
+  and pulling out -- is modelled; what is not is a bus blocking the lane it is stopped in.

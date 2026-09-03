@@ -222,6 +222,18 @@ namespace CnaCity
             route.stops = ordered;
             route.stopDistance = orderedDistance;
 
+            // Set back from the junction, which is where a bus stop belongs and where the geometry
+            // works. A stop is laid out on a road node, and a route turns at a node: sampling the
+            // direction there gives the bisector of the turn, so offsetting into the nearside lane
+            // throws the bus outside the corner by the offset times root two -- which downtown put
+            // a twelve-metre bus on the grass beside the crossing. Every stop on the route moves
+            // back by the same distance, so their order round the loop is unchanged.
+            for (float& d : route.stopDistance)
+            {
+                d -= 18.0f;
+                if (d < 0.0f) d += route.length;
+            }
+
             const auto routeIndex = static_cast<std::uint32_t>(routes_.size());
             for (std::uint32_t i = 0; i < route.stops.size(); ++i)
             {
@@ -239,11 +251,16 @@ namespace CnaCity
         {
             if (stop.routes.empty()) continue;
             const auto& [route, index] = stop.routes.front();
-            const Vec2 direction = DirectionOnRoute(route, routes_[route].stopDistance[index]);
-            const float lane = OffsetOnRoute(route, routes_[route].stopDistance[index]);
+            const float along = routes_[route].stopDistance[index];
+            // Taken from the route rather than from the node the stop was laid out on, because the
+            // stop has just moved back from that node. A shelter that stays at the junction while
+            // the bus pulls up eighteen metres short of it is two pieces of furniture for one
+            // stop.
+            const Vec2 centre = PointOnRoute(route, along);
+            const Vec2 direction = DirectionOnRoute(route, along);
             const Vec2 nearside = Perp(direction) * -1.0f;
-            stop.kerb = stop.position + nearside * lane;
-            stop.position = stop.position + nearside * (lane + 3.2f);
+            stop.kerb = centre + nearside * OffsetOnRoute(route, along);
+            stop.position = centre + nearside * (OffsetOnRoute(route, along) + 3.2f);
         }
 
         // Drop the stops nothing calls at. A shelter with no service is worse than no shelter:
