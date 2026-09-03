@@ -45,6 +45,7 @@ namespace CnaCity
         std::string csvPath;
         int frameLimit = 0;                  ///< 0 means run until the window closes.
         std::vector<std::uint32_t> benchScales;
+        bool followMetro = false;   ///< Start the follow camera on somebody using the underground.
         bool showHelp = false;
         bool listWeather = false;
         std::string error;

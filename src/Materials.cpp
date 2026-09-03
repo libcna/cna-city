@@ -642,8 +642,19 @@ namespace CnaCity
         plainMaterial(CityMaterial::VehicleBody, Color(240, 240, 240, 255), 0.26f, 0.12f, 0.0f);
         plainMaterial(CityMaterial::VehicleGlass, Color(38, 44, 52, 255), 0.10f, 0.20f, 0.0f);
         plainMaterial(CityMaterial::Person, Color(236, 236, 236, 255), 0.74f, 0.0f, 0.0f);
-        plainMaterial(CityMaterial::MetroTunnel, Color(96, 94, 92, 255), 0.88f, 0.0f, 0.0f);
-        materials_[static_cast<int>(CityMaterial::MetroTunnel)].worldScale = Vec2(6.0f, 6.0f);
+        plainMaterial(CityMaterial::MetroTunnel, Color(122, 120, 116, 255), 0.86f, 0.0f, 0.0f);
+        {
+            // The underground is the one place the sun never reaches and the sky cannot light, so
+            // it carries its own. Without this the follow camera takes you down a staircase with a
+            // commuter and shows you a black screen -- the geometry is all there and none of it is
+            // lit by anything.
+            Material& tunnel = materials_[static_cast<int>(CityMaterial::MetroTunnel)];
+            Bitmap glow(32, 32, Color(255, 250, 236, 255));
+            AddNoise(glow, rng, 0.03f, 0.06f);
+            tunnel.emissive = Adopt(UploadWithMips(device, glow, true));
+            tunnel.constantEmissive = 0.20f;
+            tunnel.worldScale = Vec2(6.0f, 6.0f);
+        }
     }
 
     void MaterialLibrary::Apply(PbrEffect& effect, CityMaterial which, float nightLevel,
@@ -676,7 +687,8 @@ namespace CnaCity
             Clamp(wetRoughness + (0.94f - wetRoughness) * lying, 0.035f, 1.0f));
         effect.setMetallicFactorProperty(material.metallic);
 
-        const float emissive = material.nightEmissive * Saturate(nightLevel);
+        const float emissive = std::max(material.constantEmissive,
+                                        material.nightEmissive * Saturate(nightLevel));
         effect.setEmissiveFactorProperty(Vector3(emissive, emissive * 0.94f, emissive * 0.84f));
     }
 }

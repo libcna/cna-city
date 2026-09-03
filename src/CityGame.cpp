@@ -359,7 +359,7 @@ namespace CnaCity
                                             static_cast<int>(Overlay::Count));
         if (pressed(Keys::N))
         {
-            followAgent_ = sim_.PickInterestingAgent(static_cast<std::uint32_t>(frameCount_));
+            followAgent_ = sim_.PickInterestingAgent(static_cast<std::uint32_t>(frameCount_), options_.followMetro);
             followSnap_ = true;
             followLocked_ = false;
             cameraMode_ = CameraMode::Follow;
@@ -460,7 +460,7 @@ namespace CnaCity
                     // Picked lazily rather than at load: the list of people currently outdoors is
                     // built by the first simulation step, so asking before then reliably returned
                     // somebody sitting indoors and the camera hung in the sky above them.
-                    followAgent_ = sim_.PickInterestingAgent(static_cast<std::uint32_t>(frameCount_));
+                    followAgent_ = sim_.PickInterestingAgent(static_cast<std::uint32_t>(frameCount_), options_.followMetro);
                     followSnap_ = true;
                 }
                 if (followAgent_ == kNoIndex) break;
@@ -471,11 +471,20 @@ namespace CnaCity
                 // from opening on a wall, because the first person it is handed is as likely to be
                 // asleep as on their way to work.
                 const auto currentMode = static_cast<Mode>(sim_.agents().mode[followAgent_]);
-                followIdleSeconds_ = currentMode == Mode::Indoors ? followIdleSeconds_ + dt : 0.0f;
-                if (!followLocked_ && followIdleSeconds_ > 2.5f)
+                // `--follow-metro` means "show me the underground", so a subject who has surfaced
+                // and is now walking down a street is no longer the subject it asked for. Without
+                // this the flag picks a passenger once and then follows them for the rest of their
+                // day above ground, which is the ordinary follow camera with extra steps.
+                const bool wrongPlace =
+                    options_.followMetro && currentMode != Mode::Riding &&
+                    currentMode != Mode::WaitingTrain;
+                followIdleSeconds_ =
+                    (currentMode == Mode::Indoors || wrongPlace) ? followIdleSeconds_ + dt : 0.0f;
+                const float patience = wrongPlace ? 1.5f : 2.5f;
+                if (!followLocked_ && followIdleSeconds_ > patience)
                 {
                     followAgent_ = sim_.PickInterestingAgent(
-                        static_cast<std::uint32_t>(frameCount_ * 7 + 13));
+                        static_cast<std::uint32_t>(frameCount_ * 7 + 13), options_.followMetro);
                     followIdleSeconds_ = 0.0f;
                     followSnap_ = true;
                     if (followAgent_ == kNoIndex) break;
@@ -485,11 +494,18 @@ namespace CnaCity
                 const auto mode = static_cast<Mode>(sim_.agents().mode[followAgent_]);
                 // Behind and above the shoulder, and closer when the subject is on foot than when
                 // they are in a car or on a train.
+                const bool underground = mode == Mode::Riding || mode == Mode::WaitingTrain;
                 const float distance = mode == Mode::Walking ? 6.5f
                                      : mode == Mode::Indoors ? 11.0f
+                                     : underground           ? 12.0f
                                                              : 13.0f;
+                // Underground the offset has to stay *inside* the tunnel. The running tunnel's
+                // roof is 3.4 m above the track, so the 4.6 m a road vehicle gets puts the lens in
+                // the earth above it looking down through the roof at the skyline -- which is what
+                // the first underground frames showed.
                 const float height = mode == Mode::Walking ? 2.6f
                                    : mode == Mode::Indoors ? 6.0f
+                                   : underground           ? 1.9f
                                                            : 4.6f;
                 // Indoors the subject's heading is stale, so the camera swings off the doorway's
                 // own axis instead: standing behind a citizen who is not facing anywhere puts the
@@ -504,7 +520,13 @@ namespace CnaCity
                 // pavement with a building right behind them, so a chase camera at a fixed
                 // distance is inside that building about half the time; the fix is to walk the
                 // offset back toward the subject and, failing that, to rise above the roof.
-                for (int step = 0; step < 6; ++step)
+                //
+                // Only above ground. `BuildingHeightAt` answers 0 where there is no building, and
+                // 0 is *higher* than anything underground -- so following a passenger on a train
+                // the loop decided the camera was buried, climbed out step by step, and surfaced
+                // in a field. The one place the subject can be is the one place there is nothing
+                // to collide with.
+                for (int step = 0; step < 6 && wanted.Y > 0.5f; ++step)
                 {
                     const float roof = sim_.city().BuildingHeightAt(ToGround(wanted));
                     if (roof < wanted.Y - 0.4f) break;
@@ -808,7 +830,10 @@ namespace CnaCity
         // distance that is enough to walk them out of shot.
         UpdateCamera(clamped);
 
-        if (options_.frameLimit > 0 && frameCount_ >= options_.frameLimit) Exit();
+        // A capture that is still waiting for its subject keeps the loop alive past the limit.
+        const bool waitingForShot = !options_.screenshotPath.empty() && !screenshotTaken_ &&
+                                    options_.followMetro;
+        if (options_.frameLimit > 0 && frameCount_ >= options_.frameLimit && !waitingForShot) Exit();
         Game::Update(gameTime);
     }
 
@@ -1347,7 +1372,19 @@ namespace CnaCity
         // harness then never reaches Draw for that frame -- so asking for the capture on exactly
         // the last frame produces no file at all.
         const int captureFrame = options_.frameLimit > 0 ? std::max(1, options_.frameLimit - 1) : 12;
-        if (!options_.screenshotPath.empty() && !screenshotTaken_ && frameCount_ >= captureFrame)
+        // With --follow-metro the capture also waits for the subject to actually be underground.
+        // A passenger's ride is a couple of real seconds out of a run of thousands of frames, so a
+        // capture on a fixed frame lands on the walk at one end or the other about nine times in
+        // ten -- which is how the underground went unlooked-at for as long as it did.
+        bool subjectReady = true;
+        if (options_.followMetro && followAgent_ != kNoIndex && followAgent_ < sim_.agents().size())
+        {
+            const auto mode = static_cast<Mode>(sim_.agents().mode[followAgent_]);
+            subjectReady = mode == Mode::Riding || mode == Mode::WaitingTrain ||
+                           frameCount_ > captureFrame * 3;   // give up rather than run for ever
+        }
+        if (!options_.screenshotPath.empty() && !screenshotTaken_ && frameCount_ >= captureFrame &&
+            subjectReady)
         {
             SaveScreenshot();
             screenshotTaken_ = true;
@@ -1519,7 +1556,14 @@ namespace CnaCity
 
         if (!right.empty())
         {
-            const int panelWidth = 420;
+            // Sized to the widest line rather than to a guess. "STUDENT, COMMUTING TO WORK (ON
+            // FOOT)" is thirty-six characters, which at this scale is 432 pixels, and the fixed
+            // 420 cut the closing bracket off the one panel in the program whose whole job is to
+            // tell you what somebody is doing.
+            int panelWidth = 0;
+            for (const std::string& item : right)
+                panelWidth = std::max(panelWidth, text_.Measure(item, kScale));
+            panelWidth = std::min(panelWidth + 20, width - 16);
             const int x = width - panelWidth - 8;
             if (const Texture2D* white = text_.WhitePixel())
                 batch_->Draw(*white,

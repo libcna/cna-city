@@ -7,15 +7,19 @@ CNA City is not a game. It is a technology demonstration whose only purpose is t
 runtime — the C++ reimplementation of the XNA 4.0 programming model — until something in it bends,
 and to say precisely what bent. A city is the workload chosen for that, because a city is the one
 scene that is simultaneously hostile to every subsystem at once: a hundred thousand agents to
-simulate, tens of thousands of instanced objects to cull and draw, thousands of dynamic lights at
-night, a sky that changes for twenty-four simulated hours, and a camera that can drop from an
-overview of the whole map to the shoulder of one pedestrian without a loading screen.
+simulate, tens of thousands of instanced objects to cull and draw, fourteen thousand street lamps
+and a hundred thousand lit windows after dark, a sky that changes for twenty-four simulated hours,
+and a camera that can drop from an overview of the whole map to the shoulder of one pedestrian
+without a loading screen.
 
-The demo deliberately uses **more than XNA 4.0 ever had**. Everything in the `CNAEXT` engine layer
-that makes a modern frame — clustered forward lighting, cascaded shadow maps, an analytic
-atmospheric sky, HDR with ACES tonemapping, SSAO, bloom, volumetric fog, depth of field, GPU
-timers — is switched on here, because "what can CNA actually do" is the question this program
-exists to answer.
+The demo deliberately uses **more than XNA 4.0 ever had**: cascaded shadow maps, an analytic
+atmospheric sky that also supplies the ambient through image-based lighting, HDR with ACES
+tonemapping, SSAO fed by a depth-normal prepass, bloom, height fog, GPU timer queries, hardware
+instancing and compute-free procedural texturing. Three things in the `CNAEXT` layer are
+deliberately *not* switched on — clustered forward lighting, volumetric fog and depth of field —
+and the reason for each is in [`CNA-FINDINGS.md`](CNA-FINDINGS.md) rather than left unsaid, because
+"what can CNA actually do" is the question this program exists to answer and half of an honest
+answer is what it cannot.
 
 ---
 
@@ -43,15 +47,14 @@ through the `CNAEXT` engine layer:
   `PbrEffect::setImageBasedLightEXT` lights the city with. The ambient is the sky, not a constant.
 - `CascadedShadowMap`, four cascades, for sun shadows across a city-scale view.
 - `RenderPipeline` with HDR and ACES, bloom, SSAO fed by a `DepthNormalPrepass` the game draws
-  itself, height and volumetric fog, light shafts and FXAA. Chromatic aberration and film grain at
-  ultra.
+  itself, height fog, light shafts and FXAA. Chromatic aberration and film grain at ultra.
 - `InstancedRendererEXT` and `LodGroupEXT` for the tens of thousands of *identical* lamps, trees,
   vehicles and people; buildings are baked into per-chunk buffers instead, so each one's facade UVs
   come from its own dimensions. `FrustumCullerEXT` culls both.
 - `DebugDraw` for the road-network and route overlays, and `RenderPipeline::setGpuTimingEnabledEXT`
   with `getPassTimingsEXT` (`F3`) so a demo that claims to find bottlenecks can name them.
 
-Two things it deliberately does **not** use, and why — both are in
+Three things it deliberately does **not** use, and why — all three are in
 [`CNA-FINDINGS.md`](CNA-FINDINGS.md):
 
 - **`ClusteredForwardEffect`.** It is what carries many punctual lights, and it cannot carry a
@@ -62,6 +65,10 @@ Two things it deliberately does **not** use, and why — both are in
   engine's particle system falls back to a CPU simulation without compute, but it also cannot be
   told to follow the camera the way a precipitation column has to, and a fixed budget of streaks
   wrapped around the viewer is both cheaper and what the effect actually needs.
+- **Volumetric fog.** `RenderPipeline` adds the pass whenever the density is above zero and never
+  gives it a light, nor exposes it so a game could. With no light and no shadow map it integrates
+  scattering against the empty sky and returns a band of red and green above every roofline. It is
+  a switch that turns on an artefact (A8).
 
 ## Camera modes
 

@@ -411,12 +411,26 @@ namespace CnaCity
                                  Vector3(-side.X, 0.0f, -side.Y), Vec2(0.0f, 0.0f),
                                  Vec2(length / 6.0f, 1.0f));
                 }
+                // A roof over the tunnel. Without one a passenger on a train looks *up* and sees
+                // the sky: the ground above is a single-sided surface facing the other way, so it
+                // is culled from below and there is nothing between the carriage and the horizon.
+                // Two triangles a segment for the only part of the network a rider ever sees.
+                mesh.AddQuad(ToWorld(b + side, kMetroDepth + 3.4f), ToWorld(a + side, kMetroDepth + 3.4f),
+                             ToWorld(a - side, kMetroDepth + 3.4f), ToWorld(b - side, kMetroDepth + 3.4f),
+                             Vector3(0.0f, -1.0f, 0.0f), Vec2(0.0f, 0.0f),
+                             Vec2(length / 6.0f, 1.4f));
             }
         for (const MetroStation& station : metro.stations())
         {
             MeshData& mesh = meshFor(station.position, CityMaterial::MetroTunnel);
+            // Platform, and a roof over it for the same reason the running tunnel has one.
             mesh.AddRibbon(station.position - Vec2(0.0f, 30.0f), station.position + Vec2(0.0f, 30.0f),
                            9.0f, kMetroDepth - 2.4f, 0.0f, 10.0f, 0.0f, 3.0f);
+            mesh.AddQuad(ToWorld(station.position + Vec2(9.0f, 30.0f), kMetroDepth + 4.0f),
+                         ToWorld(station.position + Vec2(9.0f, -30.0f), kMetroDepth + 4.0f),
+                         ToWorld(station.position + Vec2(-9.0f, -30.0f), kMetroDepth + 4.0f),
+                         ToWorld(station.position + Vec2(-9.0f, 30.0f), kMetroDepth + 4.0f),
+                         Vector3(0.0f, -1.0f, 0.0f), Vec2(0.0f, 0.0f), Vec2(10.0f, 3.0f));
         }
 
         // ---- Upload ---------------------------------------------------------------------------------

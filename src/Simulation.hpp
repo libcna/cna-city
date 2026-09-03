@@ -117,7 +117,15 @@ namespace CnaCity
         [[nodiscard]] std::string DescribeAgent(std::uint32_t agent) const;
 
         /** @brief Picks an agent that is currently outdoors, for the follow camera to adopt. */
-        [[nodiscard]] std::uint32_t PickInterestingAgent(std::uint32_t hint) const;
+        /**
+         * @brief Picks an agent the follow camera can usefully watch.
+         *
+         * @param hint  Varies the choice between calls.
+         * @param metro True to prefer somebody on a platform or a train. Underground is the least
+         *              likely place for a randomly chosen citizen to be -- about one in a thousand
+         *              at the morning peak -- so seeing that half of a commute needs asking for it.
+         */
+        [[nodiscard]] std::uint32_t PickInterestingAgent(std::uint32_t hint, bool metro = false) const;
 
         /** @brief Estimated resident memory of the simulation, for the HUD. */
         [[nodiscard]] std::size_t MemoryBytes() const;

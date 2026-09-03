@@ -1116,12 +1116,17 @@ namespace CnaCity
         return text;
     }
 
-    std::uint32_t Simulation::PickInterestingAgent(std::uint32_t hint) const
+    std::uint32_t Simulation::PickInterestingAgent(std::uint32_t hint, bool metro) const
     {
         // Somebody on foot, or nobody. Falling back to a uniformly random citizen was the first
         // version and it is worse than useless: before the first tick the list of people outdoors
         // is empty, so the follow camera's opening shot was reliably a random person asleep in a
         // building, filmed from inside the wall.
+        if (metro)
+        {
+            if (!riding_.empty()) return riding_[Hash(hint, decisionEpoch_) % riding_.size()];
+            if (!waiting_.empty()) return waiting_[Hash(hint, decisionEpoch_) % waiting_.size()];
+        }
         if (walking_.empty()) return kNoIndex;
         return walking_[Hash(hint, decisionEpoch_) % walking_.size()];
     }

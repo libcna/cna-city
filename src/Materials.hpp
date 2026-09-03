@@ -59,6 +59,8 @@ namespace CnaCity
         /// How much of the emissive map shows at night. Lit windows, shop fronts and lamp heads
         /// all ride on this one number, which the clock drives.
         float nightEmissive = 0.0f;
+        /// Emissive regardless of the hour. A tunnel is lit at noon; the sun never reaches it.
+        float constantEmissive = 0.0f;
         /// Metres of world per texture repeat, horizontally and vertically. The mesh builder uses
         /// it so that a window is the same size on a house and on a tower.
         Vec2 worldScale{4.0f, 4.0f};

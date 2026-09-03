@@ -87,6 +87,7 @@ namespace CnaCity
             "  --no-vsync            Do not wait for the vertical retrace\n"
             "  --camera M            free, orbit (default), follow, street, cinematic\n"
             "  --follow              Shorthand for --camera follow\n"
+            "  --follow-metro        Follow somebody using the underground, not somebody on foot\n"
             "  --overlay M           none, stats (default), roads, routes\n"
             "\n"
             "Measurement\n"
@@ -159,6 +160,7 @@ namespace CnaCity
             else if (arg == "--fullscreen") options.fullScreen = true;
             else if (arg == "--no-vsync") options.vsync = false;
             else if (arg == "--follow") options.camera = CameraMode::Follow;
+            else if (arg == "--follow-metro") { options.camera = CameraMode::Follow; options.followMetro = true; }
             else if (arg == "--camera")
             {
                 if (!next(value)) { options.error = "--camera needs a mode"; return false; }
