@@ -14,6 +14,28 @@ namespace CnaCity
 {
     namespace
     {
+        /**
+         * @brief Takes @p agent out of queue @p index of @p queues, if it is there.
+         *
+         * Called wherever somebody stops waiting for something other than by boarding it. The
+         * boarding passes drop stale entries themselves, but only for the one stop a vehicle
+         * happens to be standing at, which meant that for a long time giving up on a bus left the
+         * person in the queue until a bus next dwelled there -- and a passenger who has given up
+         * at one stop and joined the queue at another is in two queues at once, so the next bus at
+         * the first stop can board them and place them onto itself from across the city.
+         *
+         * A soak test found this by counting the queues against the citizens, which is the only
+         * way it shows: every other number stays plausible, and the population of people waiting
+         * for a bus simply climbs by a few every day.
+         */
+        void LeaveQueue(std::vector<std::vector<std::uint32_t>>& queues, std::uint32_t index,
+                        std::uint32_t agent)
+        {
+            if (index == kNoIndex || index >= queues.size()) return;
+            std::vector<std::uint32_t>& queue = queues[index];
+            queue.erase(std::remove(queue.begin(), queue.end(), agent), queue.end());
+        }
+
         constexpr float kPi = 3.14159265358979323846f;
         /// How many routes may be planned in one decision pass.
         ///
@@ -512,6 +534,13 @@ namespace CnaCity
         agents_.metroBoard[agent] = kNoIndex;
         agents_.metroAlight[agent] = kNoIndex;
         agents_.metroTrain[agent] = kNoIndex;
+        // The bus trio, which was missing here while the metro trio above was not. Nothing was
+        // wrong with the three lines that were here; what was wrong is that the buses arrived
+        // later and this line was never written, and a citizen who reached their door still
+        // holding a bus is exactly what that looks like.
+        agents_.busBoard[agent] = kNoIndex;
+        agents_.busAlight[agent] = kNoIndex;
+        agents_.busVehicle[agent] = kNoIndex;
 
         switch (static_cast<Activity>(agents_.activity[agent]))
         {
@@ -1116,6 +1145,10 @@ namespace CnaCity
         // exactly what a person does.
         for (std::uint32_t agent : waiting_)
         {
+            // The same reason as the bus stops below: this list predates the boarding pass, and
+            // walking a passenger off a train the simulation still believes they are on leaves a
+            // place occupied for good.
+            if (agents_.mode[agent] != static_cast<std::uint8_t>(Mode::WaitingTrain)) continue;
             agents_.waitTimer[agent] += dt;
             if (agents_.waitTimer[agent] < 420.0f) continue;
             const std::uint32_t station = agents_.metroBoard[agent] != kNoIndex
@@ -1125,6 +1158,7 @@ namespace CnaCity
             agents_.metroBoard[agent] = kNoIndex;
             agents_.metroAlight[agent] = kNoIndex;
             agents_.mode[agent] = static_cast<std::uint8_t>(Mode::Walking);
+            LeaveQueue(platformQueue_, station, agent);
             if (station != kNoIndex && station < metro_.stations().size())
             {
                 agents_.position[agent] = metro_.stations()[station].entrance;
@@ -1311,12 +1345,22 @@ namespace CnaCity
         // minutes at a stop is where a real person starts walking.
         for (std::uint32_t agent : atStop_)
         {
+            // `atStop_` was collected at the end of the previous tick, and the boarding pass above
+            // has already run: somebody in this list may be sitting on a bus by now. Giving up on
+            // their behalf would take them off the bus without telling the bus, which leaves a
+            // seat occupied by nobody for the rest of the run. It needs the timer to cross 330 in
+            // the very tick they board, so it happened to one citizen in twenty thousand in a day
+            // -- often enough to matter over a week, rare enough that only a conservation count
+            // was ever going to find it.
+            if (agents_.mode[agent] != static_cast<std::uint8_t>(Mode::WaitingBus)) continue;
             agents_.waitTimer[agent] += dt;
             if (agents_.waitTimer[agent] < 330.0f) continue;
+            const std::uint32_t stop = agents_.busBoard[agent];
             agents_.waitTimer[agent] = 0.0f;
             agents_.busBoard[agent] = kNoIndex;
             agents_.busAlight[agent] = kNoIndex;
             agents_.mode[agent] = static_cast<std::uint8_t>(Mode::Walking);
+            LeaveQueue(stopQueue_, stop, agent);
             PlanWalkFrom(agent, city_.roads().FindNearestNode(agents_.position[agent]));
         }
 

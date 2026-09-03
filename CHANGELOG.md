@@ -14,6 +14,12 @@ everything lives under *Unreleased*.
   bounded faces are the city blocks. Zoning, perimeter-block building placement, towers with
   setbacks, suburban plots, industrial sheds, parkland, street furniture and planting. 24 ms for a
   3.3 km city with 204 km of road and 11 808 buildings.
+- **A soak test** (`--soak [DAYS]`). Several simulated days with a checkpoint every simulated
+  hour, asserting structural invariants that must hold at every instant, accumulation trends that
+  must not drift, and recovery behaviour that must come back down -- plus both frame models run
+  over the same slices with their world digests compared at every checkpoint, and a snapshot taken
+  mid-run, reloaded and stepped alongside for an hour before being compared. Writes the hourly
+  checkpoints to CSV with `--soak-csv`.
 - **Simulation.** A hundred thousand citizens in a struct-of-arrays store with homes, workplaces
   and 24-hour schedules; two-level route planning with a direct-mapped cache; IDM car-following
   with signalised junctions; hashed-grid crowd separation; an underground with timetabled trains;
@@ -30,6 +36,18 @@ everything lives under *Unreleased*.
   simulated day.
 
 ### Fixed
+- **Five defects found by the soak test, none of which crashed anything.** Citizens who gave up
+  waiting for a bus or a train were never taken out of the queue they were standing in, so a
+  small city ended the night with 457 of its 3000 inhabitants permanently "waiting"; the give-up
+  rule could fire on somebody who had boarded earlier in the same tick, taking them off a vehicle
+  without telling it and leaking a seat for the rest of the run; `FinishTrip` cleared the metro
+  fields and not the matching bus ones, so a citizen could reach their own front door still
+  holding a bus; a bus's lane came from a lateral offset interpolated along a leg, so two buses on
+  one piece of kerb were filed under different lanes, became invisible to each other, drove
+  through one another and stopped in the same place, which a gap-based follower model cannot
+  resolve; and the bay check asked whether the point a bus currently occupies is free rather than
+  the point it is about to be teleported onto, so a bus that had overshot jumped backwards on top
+  of the one already standing there.
 - Every flat roof in the city was back-facing and therefore not drawn. From above you look *into*
   the buildings, whose walls are culled from the inside, and what shows through is the pavement
   between them — it reads as a roof, and it survived a dozen aerial screenshots.

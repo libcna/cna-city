@@ -418,10 +418,7 @@ namespace CnaCity
         if (route.points.size() < 2 || route.legSegment.empty()) return false;
         float wrapped = std::fmod(bus.position, route.length);
         if (wrapped < 0.0f) wrapped += route.length;
-        const auto it = std::upper_bound(route.distance.begin(), route.distance.end(), wrapped);
-        const std::size_t leg = static_cast<std::size_t>(
-            Clamp(static_cast<int>(it - route.distance.begin()) - 1, 0,
-                  static_cast<int>(route.points.size()) - 2));
+        const std::size_t leg = LegAt(route, bus.position);
         if (route.legSegment[leg] == 0xFFFFFFFFu) return false;
         outSegment = route.legSegment[leg];
         outForward = route.legForward[leg];
@@ -441,14 +438,35 @@ namespace CnaCity
         }
     }
 
+    std::size_t BusNetwork::LegAt(const BusRoute& route, float position) const
+    {
+        float wrapped = std::fmod(position, route.length);
+        if (wrapped < 0.0f) wrapped += route.length;
+        const auto it = std::upper_bound(route.distance.begin(), route.distance.end(), wrapped);
+        return static_cast<std::size_t>(
+            Clamp(static_cast<int>(it - route.distance.begin()) - 1, 0,
+                  static_cast<int>(route.points.size()) - 2));
+    }
+
     std::uint8_t BusNetwork::LaneOf(const Bus& bus) const
     {
-        // The kerbside lane, which is where a bus belongs and which is also the lane its own
-        // lateral offset already puts it in. Deriving it from the offset rather than storing a
-        // second copy is what keeps the two from disagreeing.
+        // The kerbside lane, taken from the leg the bus is on -- the same leg that decides which
+        // road segment it is on, so the two cannot disagree.
+        //
+        // It used to come from the offset interpolated *along* the leg, which is the right number
+        // for drawing a bus and the wrong one for filing it. A route leaving a narrow street for a
+        // wide one has an offset that slides from about 2.5 m to about 5, crossing the 3.4 m lane
+        // boundary somewhere in the middle of a leg -- so two buses a few metres apart on the same
+        // piece of kerb were in different lanes, the occupancy structure is bucketed per lane, and
+        // each was invisible to the other. They drove through one another and stopped in the same
+        // place, where each reads the other as zero metres ahead and neither can move again.
+        //
+        // A soak run found the far end of that: whole routes stacked on a single metre of road,
+        // fifteen passengers aboard who never arrived anywhere, and every invariant still holding,
+        // because a stationary bus is not a broken one.
         const BusRoute& route = routes_[bus.route];
-        if (route.offset.empty()) return 0;
-        return LaneFromOffset(OffsetOnRoute(bus.route, bus.position));
+        if (route.offset.empty() || route.points.size() < 2) return 0;
+        return LaneFromOffset(route.offset[LegAt(route, bus.position)]);
     }
 
     std::vector<RoadObstacle> BusNetwork::RoadOccupancy() const
@@ -589,16 +607,30 @@ namespace CnaCity
         // rather than the whole fleet. Everything else a bus needs to know about what is in front
         // of it now comes out of the road's own occupancy structure, which counts cars too -- the
         // all-pairs scan this replaced could only ever see other buses.
-        dwelling_.clear();
-        dwellingAt_.clear();
+        // Every bus that is not moving, not merely every bus that is dwelling. Taking a stop
+        // snaps the arriving bus onto the stop's exact point, so the question this list answers
+        // is "is there already a vehicle on that point" -- and a bus whose dwell has expired but
+        // which has not pulled away yet is just as much on it. Asking only about dwelling buses
+        // meant an arrival snapped straight through a stationary one, and once two buses are
+        // coincident a gap-based follower model has no way out: each sees the other at zero
+        // distance, both hold at a standstill, and every bus that arrives afterwards snaps onto
+        // the pile as well. A soak run finished the day with all seven buses of a route stacked
+        // on one metre of road, none of them moving again.
+        routeBuses_.assign(routes_.size(), {});
         for (std::size_t b = 0; b < buses_.size(); ++b)
-            if (buses_[b].dwellRemaining > 0.0f)
+            if (buses_[b].route < routeBuses_.size())
+                routeBuses_[buses_[b].route].push_back(static_cast<std::uint32_t>(b));
+
+        standing_.clear();
+        standingAt_.clear();
+        for (std::size_t b = 0; b < buses_.size(); ++b)
+            if (buses_[b].dwellRemaining > 0.0f || buses_[b].speed <= 0.05f)
             {
                 Vec2 at(0.0f, 0.0f);
                 float heading = 0.0f;
                 Placement(buses_[b], at, heading);
-                dwelling_.push_back(static_cast<std::uint32_t>(b));
-                dwellingAt_.push_back(at);
+                standing_.push_back(static_cast<std::uint32_t>(b));
+                standingAt_.push_back(at);
             }
 
         for (std::size_t index = 0; index < buses_.size(); ++index)
@@ -655,6 +687,48 @@ namespace CnaCity
             // lorry, another bus, or a bus standing at the stop this one is approaching. Before
             // this, a bus could not see a car at all -- it drove through the queue it should have
             // been at the back of, and the queue drove through it.
+            // --- The bus in front on this route ------------------------------------------------
+            //
+            // Restored, in a cheaper form, after the road occupancy replaced the all-pairs scan
+            // that used to do it. The road structure is the right place to ask about cars and
+            // about buses on other routes, and it cannot answer for two buses on the same route
+            // in two places where it matters: on the leg that closes the loop, which the router
+            // leaves without a road segment so both buses are invisible *and* blind, and wherever
+            // two buses on one piece of kerb are filed under different lanes.
+            //
+            // Both were found by a soak run whose city ended the night with whole routes stacked
+            // on a single metre of road: two buses in the same place read each other as zero
+            // metres ahead, both hold, and a gap-based model has nothing asymmetric left to
+            // separate them with. The cure is not to let it happen -- a bus never closes on the
+            // bus in front of it on its own route, whatever the road says.
+            //
+            // Per route rather than all pairs: seven buses to scan instead of ninety-three, and
+            // the position comparison is along the loop, which is exactly the quantity that has
+            // to stay ordered.
+            {
+                float routeGap = route.length;
+                float leaderSpeed = 0.0f;
+                for (std::uint32_t other : routeBuses_[bus.route])
+                {
+                    if (other == index) continue;
+                    float ahead = buses_[other].position - bus.position;
+                    if (ahead < 0.0f) ahead += route.length;
+                    if (ahead < routeGap)
+                    {
+                        routeGap = ahead;
+                        leaderSpeed = buses_[other].speed;
+                    }
+                }
+                if (routeGap < kFollowingGap + 30.0f)
+                {
+                    const float allowed =
+                        std::max(0.0f, (routeGap - kFollowingGap) / 30.0f) * kCruiseSpeed;
+                    const float reachable =
+                        std::max(0.0f, routeGap - kFollowingGap) / std::max(dt, 1e-3f);
+                    bus.speed = std::min({bus.speed, std::max(allowed, leaderSpeed), reachable});
+                }
+            }
+
             std::uint32_t segment = 0;
             std::uint8_t forward = 1;
             float along = 0.0f;
@@ -714,22 +788,44 @@ namespace CnaCity
                 // so without this a bus arriving at an occupied stop teleports the last metre into
                 // the one already standing there. It holds instead and takes the stop when the bay
                 // clears, which is also what happens on a real street.
+                // Measured at the stop, not at the bus. Taking the stop teleports the bus onto
+                // the stop's exact point -- forwards by up to a metre, or *backwards* by up to
+                // twenty when it has overshot -- so the question is whether the point it is about
+                // to occupy is free, and asking whether the point it currently occupies is free
+                // answers a different one. A bus sixteen metres past the stop passed this check
+                // by being far enough away from the bus standing in the bay, and then jumped
+                // backwards on top of it. That is how two buses ended up at the same position
+                // with nothing in the follower model able to separate them again.
+                Bus atStop = bus;
+                atStop.position = route.stopDistance[bus.nextStop];
                 Vec2 here(0.0f, 0.0f);
                 float heading = 0.0f;
-                Placement(bus, here, heading);
+                Placement(atStop, here, heading);
                 bool bayTaken = false;
-                for (std::size_t d = 0; d < dwelling_.size() && !bayTaken; ++d)
-                    bayTaken = dwelling_[d] != index &&
-                               DistanceSq(dwellingAt_[d], here) < kFollowingGap * kFollowingGap;
+                for (std::size_t d = 0; d < standing_.size() && !bayTaken; ++d)
+                    bayTaken = standing_[d] != index &&
+                               DistanceSq(standingAt_[d], here) < kFollowingGap * kFollowingGap;
                 if (bayTaken)
                 {
                     bus.speed = 0.0f;
+                    standing_.push_back(static_cast<std::uint32_t>(index));
+                    standingAt_.push_back(here);
                     continue;
                 }
 
                 bus.position = route.stopDistance[bus.nextStop];
                 bus.speed = 0.0f;
                 bus.dwellRemaining = kDwellSeconds;
+
+                // And it is standing there from now on, including for the buses this same pass
+                // has yet to reach. The list above is built once at the top of the tick, so
+                // without this two buses arriving in one tick would both find the bay free.
+                Vec2 taken(0.0f, 0.0f);
+                float takenHeading = 0.0f;
+                Placement(bus, taken, takenHeading);
+                standing_.push_back(static_cast<std::uint32_t>(index));
+                standingAt_.push_back(taken);
+
                 bus.nextStop = (bus.nextStop + 1) % static_cast<std::uint32_t>(route.stops.size());
             }
         }

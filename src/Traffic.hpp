@@ -164,6 +164,8 @@ namespace CnaCity
         [[nodiscard]] std::uint8_t SignalColour(std::uint32_t node, std::uint32_t incidenceSlot) const;
 
         [[nodiscard]] float signalClock() const { return signalClock_; }
+        /** @brief Lanes each way, which is what makes a lane index valid or not. */
+        [[nodiscard]] std::uint32_t lanesPerDirection() const { return lanesPerDirection_; }
 
         /**
          * @brief Reads or writes the fleet and the signals.

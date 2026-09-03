@@ -2,6 +2,7 @@
 #include "CliOptions.hpp"
 
 #include <cstdio>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -113,6 +114,8 @@ namespace CnaCity
             "  --record FILE         Write a replay of this run\n"
             "  --replay FILE         Re-run a replay and report whether it still reproduces\n"
             "  --checkpoint-every N  Ticks between replay checkpoints (default 1200)\n"
+            "  --soak [DAYS]         Simulate DAYS days (default 3) asserting nothing accumulates\n"
+            "  --soak-csv FILE       Write the soak's hourly checkpoints to FILE\n"
             "  --save FILE           Write a snapshot of the world when the run ends\n"
             "  --load FILE           Start from a snapshot instead of from the start hour\n"
             "  --note TEXT           Description stored in the snapshot header\n"
@@ -264,6 +267,29 @@ namespace CnaCity
                 if (!next(value)) { options.error = "--replay needs a path"; return false; }
                 options.replayPath = value;
                 options.mode = RunMode::Replay;
+            }
+            else if (arg == "--soak")
+            {
+                // The day count is optional, so that --soak on its own does the useful thing.
+                // Consumed only when it looks like a number: "--soak --agents 5000" must not
+                // swallow the flag behind it and then complain that it is not a duration.
+                options.mode = RunMode::Soak;
+                if (i + 1 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 1][0])) != 0)
+                {
+                    const long value = std::strtol(argv[++i], nullptr, 10);
+                    if (value <= 0)
+                    {
+                        options.error = "--soak wants a positive number of days";
+                        return false;
+                    }
+                    options.soakDays = static_cast<int>(value);
+                }
+            }
+            else if (arg == "--soak-csv")
+            {
+                if (!next(value)) { options.error = "--soak-csv needs a path"; return false; }
+                options.soakCsvPath = value;
+                if (options.mode != RunMode::Soak) options.mode = RunMode::Soak;
             }
             else if (arg == "--checkpoint-every")
             {

@@ -87,6 +87,7 @@ add_library(cna-city-sim STATIC
     src/Snapshot.cpp
     src/Report.cpp
     src/Replay.cpp
+    src/Soak.cpp
     src/MeshBuilder.cpp
 )
 
@@ -194,6 +195,7 @@ if(CNA_CITY_BUILD_TESTS)
         tests/SnapshotTests.cpp
         tests/ReportTests.cpp
         tests/FrameWorkerTests.cpp
+        tests/SoakTests.cpp
     )
     target_link_libraries(cna-city-tests PRIVATE cna-city-sim gtest gmock)
     if(NOT MSVC)

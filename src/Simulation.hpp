@@ -145,6 +145,24 @@ namespace CnaCity
         /** @brief The agents standing at a bus stop, which is above ground and drawn as such. */
         [[nodiscard]] const std::vector<std::uint32_t>& busQueueAgents() const { return atStop_; }
 
+        /**
+         * @brief Who is standing on each platform, and at each stop.
+         *
+         * Exposed for the invariant checks, which is a narrow reason to widen an interface and a
+         * good one: these two are the city's only unbounded containers, the only place a citizen
+         * can be forgotten rather than dropped, and a leak here is invisible in every other
+         * number the simulation reports -- the mode counts stay consistent, the route pool stays
+         * healthy, and the queue just grows.
+         */
+        [[nodiscard]] const std::vector<std::vector<std::uint32_t>>& platformQueues() const
+        {
+            return platformQueue_;
+        }
+        [[nodiscard]] const std::vector<std::vector<std::uint32_t>>& stopQueues() const
+        {
+            return stopQueue_;
+        }
+
         /** @brief Where an agent is in the world, including its height when it is underground. */
         [[nodiscard]] Microsoft::Xna::Framework::Vector3 AgentWorldPosition(std::uint32_t agent) const;
 

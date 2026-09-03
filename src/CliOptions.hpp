@@ -18,7 +18,8 @@ namespace CnaCity
         Checksum,      ///< Simulate, print a digest of the world, exit.
         Replay,        ///< Re-run a recorded file and report whether it still reproduces.
         Report,        ///< Run the sweep and write a directory of results plus an HTML page.
-        Compare        ///< Read several report directories and write one page comparing them.
+        Compare,       ///< Read several report directories and write one page comparing them.
+        Soak           ///< Simulate for days and assert that nothing accumulates.
     };
 
     /**
@@ -109,6 +110,11 @@ namespace CnaCity
         /// Ticks between replay checkpoints. Small enough to bisect a divergence, large enough
         /// that taking one is not most of the run.
         std::uint64_t checkpointInterval = 1200;
+        /// --soak: simulated days to run. Three is the least that answers anything: the first
+        /// is warm-up and thrown away, and the drift measurement needs two whole days after it
+        /// to take the daily cycle out before it looks for a gradient.
+        int soakDays = 3;
+        std::string soakCsvPath;   ///< --soak-csv: the hourly checkpoints, for plotting.
         bool showHelp = false;
         bool listWeather = false;
         std::string error;

@@ -154,7 +154,7 @@ cmake --build build -j$(nproc)
 ctest --test-dir build --output-on-failure
 ```
 
-A hundred and two cases across seventeen suites, weighted towards regression rather than coverage. That is
+A hundred and thirty cases across twenty-two suites, weighted towards regression rather than coverage. That is
 deliberate: this program is a benchmark, and **a simulation that quietly stops moving anybody gets
 faster.** Every defect recorded in [`ARCHITECTURE.md`](ARCHITECTURE.md) did exactly that, and three
 of them looked like tuning. The tests are named for the defect rather than for the function —
@@ -190,6 +190,71 @@ that differs means the *generator* moved, agents alone means the schedule or the
 traffic alone means the road model did. It then re-runs the whole thing at half the step size and
 on a different number of worker threads and says whether those agreed — a determinism claim that is
 only ever checked one way is one that has already been broken here twice.
+
+### The soak, which is where the slow failures live
+
+```sh
+./build/cna-city --soak 3 --soak-csv soak.csv
+```
+
+Three simulated days, a checkpoint every simulated hour, and assertions rather than a person
+watching. "It ran for an hour and did not crash" is not a result: the failures a benchmark has to
+worry about do not crash. A route slot that is never given back, a passenger nobody ever picks up,
+a queue that grows by four every morning and shrinks by three every evening -- each of those is
+invisible in a thirty-second run, fatal in a long one, and raises no signal at all. They just make
+the numbers slowly stop being about a city.
+
+```
+  day  time   indoors    walk     car    plat   train    stop     bus |  routes  defer | vehicles  blocked |    RSS | inv
+    1  02:30    20000       0       0       0       0       0       0 |       0      0 |        0        0 |   65.3 |   0
+
+INVARIANTS  every check held at all 72 checkpoints
+FRAME MODEL serial and pipelined agreed on every digest
+SNAPSHOT    saved mid-run, reloaded, and carried on identically
+ACCUMULATION over 48 checkpoints after the warm-up day
+    route slots in use             mean      41.06     +0.083 per day   (allowed +20.000) ok
+    resident set (MB)              mean     291.44     +0.000 per day   (allowed +4.000) ok
+RECOVERY
+    route pool never exhausted     ok        0 times
+    the city goes home at night    ok        100.0% indoors at 03:00
+```
+
+Three kinds of check, because they fail differently.
+
+**Invariants** hold at every instant, and the ones worth having are the ones whose failure is
+silent: cross-links that must round-trip (a citizen's vehicle has to name that citizen back), sets
+that must partition (every citizen is in exactly one mode, and the mode lists must agree with the
+modes), conservation laws (the people on the buses, counted from the buses, must equal the people
+on buses counted from the citizens), occupancy that must not exceed capacity, and no two vehicles
+in the same place.
+
+**Accumulation** is the leak nobody can name yet: route slots, queue lengths, the path cache, the
+resident set. Measured as drift per simulated day with the first day discarded as warm-up.
+
+**Recovery** is what must come back down. A city where the morning peak never clears, or where the
+planner's backlog survives the night, is still producing numbers; they are just no longer numbers
+about a city.
+
+It also runs both frame models over the same slices and compares the world digest at every
+checkpoint, because "pipelining does not change the answer" is a claim, and an unchecked claim
+about concurrency is a bug with a good reputation.
+
+#### Measuring a trend is harder than it looks
+
+The obvious way to find a leak -- fit a line through the hourly samples -- does not work, and the
+test that says so is `ARawGradientIsFooledByTheDailyCycle`. A pure sine of period 24 sampled hourly
+over exactly three days has a least-squares gradient of -3.5 per sample. Whole periods cancel in
+the mean and do *not* cancel in the covariance with time, so a city's daily rhythm produces a
+gradient of its own whose sign depends on nothing but the hour the run started at. A leak detector
+built on that reports a leak on half the runs and hides one on the other half.
+
+Subtracting each sample's hour-of-day mean is the obvious repair and is wrong more quietly: it
+removes part of the drift along with the cycle, and reads a real twelve-a-day leak as nine.
+`DriftPerDay` takes whole-day means and fits through those instead. The mean of twenty-four uniform
+samples of anything with a twenty-four-hour period is exactly zero whatever hour the run began at,
+and the drift passes through untouched.
+
+### Why this belongs in CI
 
 This belongs in CI rather than in the unit suite because it takes minutes, and because it catches
 things a fast test cannot. The last defect it found needed a hundred thousand citizens and eight

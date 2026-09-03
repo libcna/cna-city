@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Benchmark.hpp"
+#include "Soak.hpp"
 #include "CityGame.hpp"
 #include "CliOptions.hpp"
 
@@ -36,6 +37,8 @@ int main(int argc, char** argv)
             return CnaCity::RunReport(options);
         case CnaCity::RunMode::Compare:
             return CnaCity::RunCompare(options);
+        case CnaCity::RunMode::Soak:
+            return CnaCity::RunSoak(options);
         case CnaCity::RunMode::Interactive:
             break;
     }

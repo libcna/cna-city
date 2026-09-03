@@ -669,3 +669,168 @@ of trams, or ten million citizens for the sake of a bigger number. The million a
 question worth asking, and answered it well -- the first thing to stop scaling was not a data
 structure but a constant scheduling policy. Another subsystem earns its place only by presenting
 CNA with a *kind* of load it has not seen.
+
+---
+
+## P21 — A soak test, and the five defects it found
+
+Not "run it for an hour and see whether it crashes". The failures a benchmark has to worry about do
+not crash: a route slot that is never given back, a passenger nobody ever picks up, a queue that
+grows by four every morning and shrinks by three every evening. Each of those is invisible in a
+thirty-second run, fatal in a long one, and raises no signal at all. They just make the numbers
+slowly stop being about a city.
+
+- [x] **P21.1 Structural invariants**, asserted at every checkpoint rather than watched. The ones
+  worth having are the ones whose failure is silent: cross-links that must round-trip, sets that
+  must partition, conservation laws counted from both ends, occupancy against capacity, and no two
+  vehicles in one place. Half the tests for them deliberately break the world first -- a checker
+  that has only ever been seen passing is a checker nobody should believe.
+
+- [x] **P21.2 Accumulation**, as drift per simulated day with the first day discarded as warm-up.
+
+- [x] **P21.3 Recovery**: what has to come back down. The planner's backlog, the traffic, the
+  queues, the population.
+
+- [x] **P21.4 Both frame models over the same slices**, digests compared at every checkpoint. They
+  agree. The comparison is per checkpoint rather than at the end because "they differ after three
+  days" is a sentence with nowhere to go and "they differ at 08:00 on day one, in the traffic
+  digest" is the first line of a bug report.
+
+- [x] **P21.5 A snapshot taken mid-run**, reloaded, and stepped alongside for a simulated hour
+  before being compared. Comparing at the moment of loading only proves the file round-trips the
+  numbers a digest looks at.
+
+### Measuring a trend is harder than it looks
+
+The obvious method is wrong and a test says so. A pure sine of period 24, sampled hourly over
+exactly three days, has a least-squares gradient of **-3.5 per sample**. Whole periods cancel in the
+mean and do not cancel in the covariance with time, so a city's daily rhythm produces a gradient of
+its own whose sign depends on nothing but the hour the run started at. A leak detector built on the
+raw gradient reports a leak on half the runs and hides one on the other half.
+
+Subtracting each sample's hour-of-day mean is the obvious repair and is wrong more quietly: it
+removes part of the drift along with the cycle, and reads a real twelve-a-day leak as nine. Whole-day
+means, fitted through, are exact -- twenty-four uniform samples of anything with a twenty-four-hour
+period sum to zero whatever hour the run began at.
+
+### What it found on its first run
+
+Five defects, none of which crashed anything, and every one of which was invisible in the numbers
+the program already printed.
+
+1. **Queue entries leaked whenever somebody gave up waiting.** The give-up rule set the mode and
+   planned a walk; it never took the citizen out of the stop queue. The queues are compacted only
+   when a vehicle dwells at that particular stop, so entries survived indefinitely -- and a citizen
+   who gave up at one stop and later joined the queue at another was in two queues at once, where
+   the next bus at the first stop could board them and place them onto itself from across the city.
+   *457 of 3000 citizens were permanently "waiting" at three in the morning.*
+
+2. **The give-up rule fired on people who had already boarded.** It iterates the mode list
+   collected at the end of the previous tick, and the boarding pass has already run -- so somebody
+   in that list may be sitting on a bus by now. Walking them off it without telling the bus leaves a
+   seat occupied by nobody for the rest of the run. It needs the timer to cross its threshold in the
+   very tick they board: *one citizen in twenty thousand per day*, which is often enough to matter
+   over a week and rare enough that only a conservation count was ever going to find it.
+
+3. **`FinishTrip` cleared the metro trio and not the bus one.** Nothing was wrong with the three
+   lines that were there; the buses simply arrived later and the matching lines were never written.
+   A citizen reached their own front door still holding a bus.
+
+4. **Two buses on one piece of kerb were filed under different lanes.** The lane came from the
+   lateral offset interpolated *along* a leg -- the right number for drawing a bus, the wrong one
+   for filing it. A route leaving a narrow street for a wide one has an offset sliding from about
+   2.5 m to about 5, crossing the 3.4 m lane boundary in the middle of a leg, and the occupancy
+   structure is bucketed per lane. The two buses were invisible to each other, drove through one
+   another, and stopped in the same place -- where each reads the other as zero metres ahead and a
+   gap-based follower model has nothing asymmetric left to separate them with. The same blindness
+   exists on the leg that closes each loop, which the router leaves without a road segment at all.
+   *Whole routes finished the day stacked on a single metre of road, with fifteen passengers aboard
+   who would never arrive anywhere, while every invariant still held -- because a stationary bus is
+   not a broken one.* Fixed by taking the lane from the leg (the same leg that decides the segment,
+   so the two cannot disagree) and by restoring a same-route following constraint, per route rather
+   than all-pairs, which the road-occupancy optimisation had quietly dropped.
+
+5. **The bay check measured the wrong point.** Taking a stop teleports the bus onto the stop's exact
+   point -- forwards by up to a metre, or backwards by up to twenty when it has overshot -- so the
+   question is whether the point it is *about to* occupy is free. It asked whether the point it
+   currently occupies is free, so a bus sixteen metres past the stop passed the check and then
+   jumped backwards on top of the bus standing in the bay.
+
+### Two things I got wrong on the way, and what caught them
+
+Worth recording, because both were fixed by measurement after a plausible story failed.
+
+- I diagnosed the coincident buses as a bay-check problem twice -- once as a stale in-tick list,
+  once as "dwelling" being the wrong predicate for "occupying the bay". Both are real defects and
+  both are fixed above. **Neither produced the state I was looking at.** Instrumenting the snap
+  showed zero buses ever snapping within two metres of another; the actual cause was the lane
+  index, three hypotheses later.
+
+- I then added a stall ceiling: a bus standing still for a minute creeps regardless of the gap,
+  by analogy with the red-light hold that already has one. It broke the deadlock and **caused
+  merges of its own** -- catching the tick where two buses first came within two metres showed one
+  creeping into the other. It was removed rather than tuned. A rule that can produce the state
+  that causes the disease is not a cure for it, and with the lane fix in place nothing needs it.
+
+### What is still wrong, and is not fixed here
+
+The command line's defaults at `--size 620` put **ninety-three buses over the twenty stops of a
+1.2 km city**. That configuration no longer deadlocks and no longer strands anybody in a queue, and
+its buses are never coincident -- but roughly fourteen riders and nineteen drivers still never
+arrive anywhere overnight. The evidence points away from the buses: the drivers are cycling through
+red lights rather than standing still, and the gridlock give-up asks whether a car has been
+*perfectly still* for four minutes rather than whether it has *made any progress*, so a slow crawl
+resets it forever.
+
+### The run that answers the question
+
+Three simulated days, 25 000 citizens, 72 checkpoints, both frame models in lockstep:
+
+```
+INVARIANTS  every check held at all 72 checkpoints
+FRAME MODEL serial and pipelined agreed on every digest
+SNAPSHOT    saved mid-run, reloaded, and carried on identically
+ACCUMULATION over 48 checkpoints after the warm-up day
+    route slots in use               mean     845.08     -0.833 per day   (allowed +20.000) ok
+    queues at platforms and stops    mean      32.67     +4.583 per day   (allowed +25.000) ok
+    simulation memory (MB)           mean      12.10     +0.000 per day   (allowed +1.000) ok
+    path cache (MB)                  mean       6.25     +0.000 per day   (allowed +0.500) ok
+    resident set (MB)                mean      70.47     +0.000 per day   (allowed +4.000) ok
+RECOVERY
+    route pool never exhausted       ok      0 times
+    planner backlog clears           ok      peak 0, 0.0 overnight
+    traffic clears after the peak    ok      peak 165, 0 overnight
+    the city goes home at night      ok      100.0% indoors at 03:00
+    nobody is left waiting overnight ok      0 people still waiting at 03:00
+    day and night keep cycling       ok      daylight ranged 0.00 to 1.00
+
+SOAK PASSED
+```
+
+Three of the five accumulation figures are exactly zero and the route pool drifts *downwards*. The
+one worth naming is **the queues at +4.6 a day against a mean of 33**: inside its tolerance, but
+that tolerance is the absolute floor rather than the proportional one, and it is 14% of the mean per
+day. Three days leaves two daily means, so that number is a difference between two days and not yet
+a trend -- a longer run is what would tell them apart, and is the obvious next thing to point this
+at.
+
+### The 100 000-citizen run
+
+A three-day soak at full scale was stopped by its own time limit 52 checkpoints in, which is enough
+to answer both questions it was asked.
+
+**Invariants: zero violations at all 52 checkpoints**, across two and a half simulated days of a
+hundred thousand people, in both frame models.
+
+**Memory: flat.** The resident set goes 94.6 -> 96.4 MB over the first eighteen checkpoints, takes
+a single 32.8 MB step, and then does not move again for **thirty-three consecutive checkpoints**.
+The step is the soak's own snapshot check building a second `Simulation` and stepping it for an
+hour; the allocator keeps the arena afterwards. It lands inside the warm-up day and is discarded
+with it -- which is now a stated requirement of where that check runs rather than a coincidence,
+because anywhere later it would read as a leak in a run whose whole purpose is to find one.
+
+It is recorded rather than fixed because it is a different subsystem, it appears only in a
+configuration that is saturated by construction, and the supported city is clean: at 3.3 km the
+soak drains to **20000 of 20000 citizens indoors, zero vehicles and zero route slots** every night.
+The regression test asserts the precise invariant (no two buses in one place) at the oversubscribed
+configuration and the outcome (nobody still aboard at three in the morning) at the ordinary one.

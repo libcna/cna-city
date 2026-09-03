@@ -155,6 +155,19 @@ namespace CnaCity
         /** @brief The kerbside lane index for the leg @p bus is on. */
         [[nodiscard]] std::uint8_t LaneOf(const Bus& bus) const;
 
+        /**
+         * @brief Which leg of @p route a bus at @p position is on.
+         *
+         * One answer, used by everything that needs it. The lane and the road segment used to be
+         * worked out separately -- the segment from the leg, the lane from the lateral offset
+         * interpolated *along* the leg -- and the two disagreed wherever a route moved from a
+         * narrow street to a wide one: the offset crossed a lane boundary in the middle of a leg,
+         * so two buses on the same piece of kerb were filed under different lanes and became
+         * invisible to each other. They then drove through each other into a single point, which
+         * a gap-based follower model has no way out of.
+         */
+        [[nodiscard]] std::size_t LegAt(const BusRoute& route, float position) const;
+
         /** @brief The stop nearest @p point, or @ref kNoStop. */
         [[nodiscard]] std::uint32_t NearestStop(Vec2 point) const;
 
@@ -184,9 +197,15 @@ namespace CnaCity
         std::vector<BusStop> stops_;
         std::vector<BusRoute> routes_;
         std::vector<Bus> buses_;
-        /// The buses standing at a stop this tick, so the check that only cares about those scans
-        /// a handful rather than the whole fleet.
-        std::vector<std::uint32_t> dwelling_;
-        std::vector<Vec2> dwellingAt_;
+        /// Buses that are not moving, and where they are. Rebuilt each pass and appended to as
+        /// the pass stops more of them, so an arriving bus can be told the bay is occupied.
+        /// "Standing" rather than "dwelling": a bus whose dwell has expired but which cannot pull
+        /// away yet is still filling the bay, and treating only dwelling buses as present is what
+        /// let seven of them end up on the same metre of road.
+        std::vector<std::uint32_t> standing_;
+        std::vector<Vec2> standingAt_;
+        /// The buses on each route, rebuilt each pass. Lets the same-route following check below
+        /// look at the seven buses of one route rather than at the whole fleet.
+        std::vector<std::vector<std::uint32_t>> routeBuses_;
     };
 }
