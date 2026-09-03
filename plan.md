@@ -808,11 +808,35 @@ SOAK PASSED
 ```
 
 Three of the five accumulation figures are exactly zero and the route pool drifts *downwards*. The
-one worth naming is **the queues at +4.6 a day against a mean of 33**: inside its tolerance, but
-that tolerance is the absolute floor rather than the proportional one, and it is 14% of the mean per
-day. Three days leaves two daily means, so that number is a difference between two days and not yet
-a trend -- a longer run is what would tell them apart, and is the obvious next thing to point this
-at.
+one worth naming was **the queues at +4.6 a day against a mean of 33**: inside its tolerance, but
+that tolerance is the absolute floor rather than the proportional one, and it came to 14% of the
+mean per day. Three days leaves two daily means, so that figure is a difference between two days
+rather than a trend, and the two cannot be told apart without more days.
+
+### Seven days, to settle that one number
+
+168 checkpoints, six daily means after the warm-up day, and no violations anywhere:
+
+```
+ day    queues    routes    RSS MB
+   1      8.96    264.83     66.30
+   2      9.88    259.58     66.30
+   3     11.33    263.71     66.30
+   4      9.04    262.17     66.30
+   5     11.08    264.58     66.30
+   6     11.29    263.29     66.30
+```
+
+Neither series is monotone. The queues go up, up, *down*, up, up -- day four falls back below day
+two -- and the route pool ends below where it started. The regression through them reports +0.371
+and +0.164 a day, which is what a least-squares fit does to six noisy points; the resident set is
+66.30 MB on every one of the six days, to two decimals.
+
+So the answer is **no accumulation**, and the three-day figure was the difference between two days
+exactly as it looked. What this really establishes is about the test rather than the city: two daily
+means are not enough to call a leak, and the honest reading of a short soak is that its accumulation
+section has not answered yet. The verdict reports the number of days it had, which is what lets a
+reader tell those two cases apart.
 
 ### The 100 000-citizen run
 
