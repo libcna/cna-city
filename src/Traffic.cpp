@@ -212,8 +212,8 @@ namespace CnaCity
             if (laneId + 1 < laneStart_.size())
                 for (std::uint32_t k = laneStart_[laneId]; k < laneStart_[laneId + 1]; ++k)
                 {
-                    const Vehicle& other = vehicles_[laneItems_[k]];
-                    const float needed = own + ProfileOf(static_cast<VehicleKind>(other.kind)).length + 2.0f;
+                    const LaneEntry other = EntryAt(laneItems_[k]);
+                    const float needed = own + other.length + 2.0f;
                     if (std::fabs(other.s - startS) < needed) { room = false; break; }
                 }
             if (room && laneId < laneRearS_.size() && std::fabs(laneRearS_[laneId] - startS) < own + 6.0f)
@@ -267,12 +267,37 @@ namespace CnaCity
         --activeCount_;
     }
 
+    Traffic::LaneEntry Traffic::EntryAt(std::uint32_t index) const
+    {
+        if (index < vehicles_.size())
+        {
+            const Vehicle& vehicle = vehicles_[index];
+            return LaneEntry{vehicle.s, vehicle.speed,
+                             ProfileOf(static_cast<VehicleKind>(vehicle.kind)).length};
+        }
+        const RoadObstacle& obstacle = obstacles_[index - vehicles_.size()];
+        return LaneEntry{obstacle.s, obstacle.speed, obstacle.length};
+    }
+
     void Traffic::RebuildLanes(const City& city)
     {
+        // Vehicles and obstacles go into the same buckets, and an index at or past the fleet's
+        // size names an obstacle. One structure rather than two is the whole point: a bus that
+        // lived in a separate list was a bus the cars could drive through.
         const std::size_t laneCount = laneStart_.size() - 1;
+        const auto laneOf = [&](std::uint32_t segment, std::uint8_t forward, std::uint8_t lane) {
+            return (segment * 2u + forward) * lanesPerDirection_ +
+                   std::min<std::uint32_t>(lane, lanesPerDirection_ - 1);
+        };
+
         std::fill(laneStart_.begin(), laneStart_.end(), 0u);
         for (const Vehicle& vehicle : vehicles_)
             if (vehicle.active) ++laneStart_[LaneIdOf(vehicle) + 1];
+        for (const RoadObstacle& obstacle : obstacles_)
+        {
+            const std::uint32_t lane = laneOf(obstacle.segment, obstacle.forward, obstacle.lane);
+            if (lane + 1 < laneStart_.size()) ++laneStart_[lane + 1];
+        }
         for (std::size_t i = 1; i <= laneCount; ++i) laneStart_[i] += laneStart_[i - 1];
 
         laneItems_.resize(laneStart_[laneCount]);
@@ -285,7 +310,49 @@ namespace CnaCity
                 laneOfVehicle_[i] = lane;
                 laneItems_[laneCursor_[lane]++] = i;
             }
+        for (std::uint32_t i = 0; i < obstacles_.size(); ++i)
+        {
+            const std::uint32_t lane =
+                laneOf(obstacles_[i].segment, obstacles_[i].forward, obstacles_[i].lane);
+            if (lane + 1 < laneStart_.size())
+                laneItems_[laneCursor_[lane]++] =
+                    static_cast<std::uint32_t>(vehicles_.size()) + i;
+        }
         (void)city;
+    }
+
+    float Traffic::GapAhead(std::uint32_t segment, std::uint8_t forward, std::uint8_t lane, float s,
+                            std::uint32_t selfObstacle, float* outLeaderSpeed) const
+    {
+        if (lanesPerDirection_ == 0) return 1e6f;
+        const std::uint32_t laneId = (segment * 2u + forward) * lanesPerDirection_ +
+                                     std::min<std::uint32_t>(lane, lanesPerDirection_ - 1);
+        if (laneId + 1 >= laneStart_.size()) return 1e6f;
+
+        const std::uint32_t self = selfObstacle == 0xFFFFFFFFu
+                                       ? 0xFFFFFFFFu
+                                       : static_cast<std::uint32_t>(vehicles_.size()) + selfObstacle;
+        float best = 1e6f;
+        float bestSpeed = 0.0f;
+        for (std::uint32_t k = laneStart_[laneId]; k < laneStart_[laneId + 1]; ++k)
+        {
+            const std::uint32_t index = laneItems_[k];
+            if (index == self) continue;
+            const LaneEntry entry = EntryAt(index);
+            const float gap = entry.s - entry.length - s;
+            if (gap >= best) continue;
+            // Behind, and therefore not this caller's problem -- except when the two are at
+            // exactly the same point, where "behind" and "in front" mean nothing. Ordering those
+            // by index gives one of them the road and the other a reason to wait; without it they
+            // yield to each other and neither moves again, which is a defect this has already had
+            // twice under two different names.
+            const bool coincident = std::fabs(entry.s - s) < 0.5f;
+            if (coincident ? index >= self : gap < -entry.length) continue;
+            best = gap;
+            bestSpeed = entry.speed;
+        }
+        if (outLeaderSpeed != nullptr) *outLeaderSpeed = bestSpeed;
+        return best;
     }
 
     void Traffic::Step(const City& city, Agents& agents, const RoutePool& routes, float dt,
@@ -316,9 +383,9 @@ namespace CnaCity
                 for (std::uint32_t i = first + 1; i < last; ++i)
                 {
                     const std::uint32_t value = laneItems_[i];
-                    const float key = vehicles_[value].s;
+                    const float key = SortKeyAt(value);
                     std::uint32_t j = i;
-                    while (j > first && vehicles_[laneItems_[j - 1]].s > key)
+                    while (j > first && SortKeyAt(laneItems_[j - 1]) > key)
                     {
                         laneItems_[j] = laneItems_[j - 1];
                         --j;
@@ -329,6 +396,9 @@ namespace CnaCity
                 for (std::uint32_t i = first; i < last; ++i)
                 {
                     const std::uint32_t index = laneItems_[i];
+                    // Obstacles take part in the ordering and in everybody else's gap, and are
+                    // never stepped: something else owns them.
+                    if (index >= vehicles_.size()) continue;
                     Vehicle& vehicle = vehicles_[index];
                     const RoadSegment& segment = city.roads().segments()[vehicle.segment];
                     const VehicleProfile& profile = ProfileOf(static_cast<VehicleKind>(vehicle.kind));
@@ -340,8 +410,8 @@ namespace CnaCity
                     float leaderSpeed = desired;
                     if (i + 1 < last)
                     {
-                        const Vehicle& leader = vehicles_[laneItems_[i + 1]];
-                        const float leaderLength = ProfileOf(static_cast<VehicleKind>(leader.kind)).length;
+                        const LaneEntry leader = EntryAt(laneItems_[i + 1]);
+                        const float leaderLength = leader.length;
                         gap = leader.s - leaderLength - vehicle.s;
                         leaderSpeed = leader.speed;
                         // A negative gap means the two have ended up inside each other, which the
@@ -489,7 +559,7 @@ namespace CnaCity
             if (laneId + 1 < laneStart_.size())
                 for (std::uint32_t k = laneStart_[laneId]; k < laneStart_[laneId + 1]; ++k)
                 {
-                    const Vehicle& other = vehicles_[laneItems_[k]];
+                    const LaneEntry other = EntryAt(laneItems_[k]);
                     const float need = ProfileOf(static_cast<VehicleKind>(vehicle.kind)).length + 2.0f;
                     if (other.s < need) { clear = false; break; }
                 }

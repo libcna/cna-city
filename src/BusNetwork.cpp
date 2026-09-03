@@ -168,6 +168,7 @@ namespace CnaCity
                     if (!route.points.empty() && DistanceSq(route.points.back(), point) < 0.25f)
                         continue;
                     route.points.push_back(point);
+                    route.node.push_back(path[p]);
                     // The road being driven, not the junction being passed: a node's own class is
                     // the most important road meeting it, so at every crossing of an arterial a
                     // bus on a collector would step out into the arterial's kerbside lane.
@@ -188,8 +189,24 @@ namespace CnaCity
             if (DistanceSq(route.points.back(), route.points.front()) > 0.25f)
             {
                 route.points.push_back(route.points.front());
+                route.node.push_back(route.node.front());
                 route.offset.push_back(route.offset.front());
                 route.signalNode.push_back(route.signalNode.front());
+            }
+
+            // The legs, which are what put the bus on the same segments the cars are on. A leg
+            // whose two nodes are not joined by a road is a hole the router should never produce;
+            // it is recorded as one rather than guessed at, and a bus on it simply does not appear
+            // in the traffic model for that stretch.
+            route.legSegment.assign(route.points.size(), 0xFFFFFFFFu);
+            route.legForward.assign(route.points.size(), 1u);
+            for (std::size_t p = 0; p + 1 < route.points.size(); ++p)
+            {
+                const std::uint32_t leg = roads.FindSegmentBetween(route.node[p], route.node[p + 1]);
+                route.legSegment[p] = leg;
+                if (leg != 0xFFFFFFFFu)
+                    route.legForward[p] =
+                        roads.segments()[leg].nodeA == route.node[p] ? 1u : 0u;
             }
             route.distance.assign(route.points.size(), 0.0f);
             for (std::size_t p = 1; p < route.points.size(); ++p)
@@ -394,6 +411,62 @@ namespace CnaCity
         outHeading = Heading(direction);
     }
 
+    bool BusNetwork::RoadPositionOf(const Bus& bus, std::uint32_t& outSegment,
+                                    std::uint8_t& outForward, float& outS) const
+    {
+        const BusRoute& route = routes_[bus.route];
+        if (route.points.size() < 2 || route.legSegment.empty()) return false;
+        float wrapped = std::fmod(bus.position, route.length);
+        if (wrapped < 0.0f) wrapped += route.length;
+        const auto it = std::upper_bound(route.distance.begin(), route.distance.end(), wrapped);
+        const std::size_t leg = static_cast<std::size_t>(
+            Clamp(static_cast<int>(it - route.distance.begin()) - 1, 0,
+                  static_cast<int>(route.points.size()) - 2));
+        if (route.legSegment[leg] == 0xFFFFFFFFu) return false;
+        outSegment = route.legSegment[leg];
+        outForward = route.legForward[leg];
+        outS = wrapped - route.distance[leg];
+        return true;
+    }
+
+    namespace
+    {
+        /// The kerbside lane index a given lateral offset lands in. One expression, used for the
+        /// lane a bus is in and for the lane it is about to be in -- they differ whenever a route
+        /// turns from a collector onto an arterial, and asking about the wrong one is how the
+        /// look-ahead over a junction came to be querying an empty lane.
+        std::uint8_t LaneFromOffset(float offset)
+        {
+            return static_cast<std::uint8_t>(std::max(0, static_cast<int>(offset / 3.4f)));
+        }
+    }
+
+    std::uint8_t BusNetwork::LaneOf(const Bus& bus) const
+    {
+        // The kerbside lane, which is where a bus belongs and which is also the lane its own
+        // lateral offset already puts it in. Deriving it from the offset rather than storing a
+        // second copy is what keeps the two from disagreeing.
+        const BusRoute& route = routes_[bus.route];
+        if (route.offset.empty()) return 0;
+        return LaneFromOffset(OffsetOnRoute(bus.route, bus.position));
+    }
+
+    std::vector<RoadObstacle> BusNetwork::RoadOccupancy() const
+    {
+        std::vector<RoadObstacle> out;
+        out.reserve(buses_.size());
+        for (const Bus& bus : buses_)
+        {
+            RoadObstacle obstacle;
+            if (!RoadPositionOf(bus, obstacle.segment, obstacle.forward, obstacle.s)) continue;
+            obstacle.speed = bus.speed;
+            obstacle.length = ProfileOf(VehicleKind::Bus).length;
+            obstacle.lane = LaneOf(bus);
+            out.push_back(obstacle);
+        }
+        return out;
+    }
+
     std::uint32_t BusNetwork::NearestStop(Vec2 point) const
     {
         std::uint32_t best = kNoStop;
@@ -508,25 +581,25 @@ namespace CnaCity
     }
 
     void BusNetwork::Step(const City& city, float dt,
-                          const std::function<bool(Vec2, Vec2)>& mayProceed)
+                          const std::function<bool(Vec2, Vec2)>& mayProceed,
+                          const std::function<float(std::uint32_t, std::uint8_t, std::uint8_t,
+                                                    float, std::uint32_t, float*)>& gapAhead)
     {
-        (void)city;
-
-        // Where every bus is, before any of them moves. Buses are not in the car-following stream
-        // -- see the class comment -- so nothing else stops two of them occupying the same twelve
-        // metres of road, and two routes sharing an arterial did exactly that: a red bus driving
-        // through a green one, in the middle of the shot. This is not car-following, it is one
-        // rule -- do not drive into the bus in front -- and at ninety-four buses the all-pairs
-        // check costs less than the route lookup that follows it.
-        occupancy_.resize(buses_.size());
+        // Where the buses that are standing at a stop are, so the bay check below scans a handful
+        // rather than the whole fleet. Everything else a bus needs to know about what is in front
+        // of it now comes out of the road's own occupancy structure, which counts cars too -- the
+        // all-pairs scan this replaced could only ever see other buses.
         dwelling_.clear();
+        dwellingAt_.clear();
         for (std::size_t b = 0; b < buses_.size(); ++b)
-        {
-            Placement(buses_[b], occupancy_[b].position, occupancy_[b].heading);
-            occupancy_[b].direction = FromHeading(occupancy_[b].heading);
             if (buses_[b].dwellRemaining > 0.0f)
+            {
+                Vec2 at(0.0f, 0.0f);
+                float heading = 0.0f;
+                Placement(buses_[b], at, heading);
                 dwelling_.push_back(static_cast<std::uint32_t>(b));
-        }
+                dwellingAt_.push_back(at);
+            }
 
         for (std::size_t index = 0; index < buses_.size(); ++index)
         {
@@ -542,10 +615,9 @@ namespace CnaCity
             }
 
             // Held at a red. The signal is read from the traffic model rather than modelled again
-            // here, so a bus stops at the same lights the cars do -- which is most of what makes
-            // one look like part of the traffic despite not being in the car-following stream.
-            // The hold has a ceiling for the same reason the vehicles' does: a bus that waits
-            // forever at a signal it has misread takes its whole route's service with it.
+            // here, so a bus stops at the same lights the cars do. The hold has a ceiling for the
+            // same reason the vehicles' does: a bus that waits forever at a signal it has misread
+            // takes its whole route's service with it.
             //
             // The signal is only asked about when there is one to ask about. Every bus used to put
             // the question every tick, and answering it starts with a nearest-node search over the
@@ -556,16 +628,12 @@ namespace CnaCity
                 const auto it = std::upper_bound(route.distance.begin(), route.distance.end(),
                                                  bus.position);
                 const std::size_t next = static_cast<std::size_t>(it - route.distance.begin());
-                if (next < route.signalNode.size() &&
-                    route.distance[next] - bus.position < 14.0f)
+                if (next < route.signalNode.size() && route.distance[next] - bus.position < 14.0f)
                     signalAhead = route.signalNode[next];
             }
-            const Vec2 at = signalAhead != 0xFFFFFFFFu ? PointOnRoute(bus.route, bus.position)
-                                                       : Vec2(0.0f, 0.0f);
-            const Vec2 ahead = signalAhead != 0xFFFFFFFFu
-                                   ? PointOnRoute(bus.route, bus.position + 11.0f)
-                                   : Vec2(0.0f, 0.0f);
-            if (signalAhead != 0xFFFFFFFFu && bus.redLightSeconds < 45.0f && !mayProceed(at, ahead))
+            if (signalAhead != 0xFFFFFFFFu && bus.redLightSeconds < 45.0f &&
+                !mayProceed(PointOnRoute(bus.route, bus.position),
+                            PointOnRoute(bus.route, bus.position + 11.0f)))
             {
                 bus.redLightSeconds += dt;
                 bus.speed = std::max(0.0f, bus.speed - kAcceleration * 2.2f * dt);
@@ -574,42 +642,6 @@ namespace CnaCity
             }
             bus.redLightSeconds = 0.0f;
 
-            // The gap to the bus in front, if there is one -- ahead of this one rather than
-            // beside or behind it, and travelling the same way, because two buses passing on
-            // opposite carriageways are three metres apart and that is correct.
-            //
-            // This started as a boolean at eighteen metres and that was not enough: braking from
-            // twelve and a half metres a second takes four seconds and covers twenty-seven, so the
-            // bus in front was reached and driven through long before the brake took effect. It
-            // is still not car-following -- there is no desired headway and no smooth approach --
-            // but the stopping distance now comes out of the gap rather than out of a constant.
-            float gapAhead = 1e9f;
-            for (std::size_t other = 0; other < buses_.size(); ++other)
-            {
-                if (other == index) continue;
-                const Vec2 delta = occupancy_[other].position - occupancy_[index].position;
-                const float ahead = Dot(delta, occupancy_[index].direction);
-                if (ahead > 60.0f) continue;
-                if (std::abs(Dot(delta, Perp(occupancy_[index].direction))) > 4.0f) continue;
-                if (Dot(occupancy_[other].direction, occupancy_[index].direction) < 0.5f) continue;
-                // "In front of me" has to be antisymmetric or two buses each yield to the other
-                // and both stop forever -- which is what the first attempt did: the tiebreak
-                // below also matched a bus clearly *behind*, so a follower correctly held for its
-                // leader while the leader held for its follower, nine metres apart, for the rest
-                // of the day. Two on the same route are unambiguous -- if I am 9 m
-                // behind you, you are 9 m in front of me -- but two on routes that meet at an
-                // angle can each project the other forwards, and an exact overlap has no
-                // direction at all. Both of those fall back to the index: the lower one has
-                // priority and drives on, the higher one holds until it is clear.
-                if (ahead < -0.5f) continue;   // behind me, and therefore their problem
-                const float theirs = Dot(Vec2(-delta.X, -delta.Y), occupancy_[other].direction);
-                if (ahead < 0.5f || theirs > 0.0f)
-                {
-                    if (other < index) gapAhead = std::min(gapAhead, std::max(0.0f, ahead));
-                    continue;
-                }
-                gapAhead = std::min(gapAhead, ahead);
-            }
             float target = route.stopDistance[bus.nextStop] - bus.position;
             if (target < 0.0f) target += route.length;
 
@@ -617,46 +649,57 @@ namespace CnaCity
             if (target <= brakingDistance + 0.5f)
                 bus.speed = std::max(1.0f, bus.speed - kAcceleration * dt);
             else
-                bus.speed = std::min(kCruiseSpeed, bus.speed + kAcceleration * dt);
+                bus.speed = std::min(bus.speed + kAcceleration * dt, kCruiseSpeed);
 
-            // The gap is applied *after* the approach to the stop, and that ordering is the whole
-            // of it: the first version capped the speed and then the stop logic below raised it
-            // again on the next line -- `std::max(1.0f, ...)` while braking, and an outright
-            // increase while cruising -- so the cap was written and immediately overwritten, and
-            // four hundred bus pairs a run were still inside each other.
-            // Approaching a stop somebody else is standing in: hold a bus length short of it
-            // rather than up against it. The check below at the moment of arrival stops a bus
-            // teleporting the last metre into an occupied bay, but by then it is already there --
-            // and two twelve-metre buses ten metres apart still overlap.
-            if (target < 45.0f)
+            // What is actually in front, from the road rather than from a list of buses: a car, a
+            // lorry, another bus, or a bus standing at the stop this one is approaching. Before
+            // this, a bus could not see a car at all -- it drove through the queue it should have
+            // been at the back of, and the queue drove through it.
+            std::uint32_t segment = 0;
+            std::uint8_t forward = 1;
+            float along = 0.0f;
+            if (gapAhead && RoadPositionOf(bus, segment, forward, along))
             {
-                const float along = route.stopDistance[bus.nextStop];
-                const Vec2 stopPoint = PointOnRoute(bus.route, along) -
-                                       Perp(DirectionOnRoute(bus.route, along)) *
-                                           OffsetOnRoute(bus.route, along);
-                for (std::uint32_t other : dwelling_)
+                const std::uint8_t lane = LaneOf(bus);
+                float leaderSpeed = 0.0f;
+                float gap = gapAhead(segment, forward, lane, along,
+                                     static_cast<std::uint32_t>(index), &leaderSpeed);
+
+                // And over the junction. The lane buckets are per segment, so a bus at the end of
+                // one cannot see the queue that starts at the beginning of the next -- it drove
+                // into the back of it every time, which is the same blind spot the cars have and
+                // which the junction pass handles for them. Looking one leg ahead when the end is
+                // close costs one more query and closes it.
+                const float toEnd = city.roads().segments()[segment].length - along;
+                if (toEnd < kFollowingGap + 20.0f)
                 {
-                    if (other == index) continue;
-                    if (DistanceSq(occupancy_[other].position, stopPoint) >
-                        kFollowingGap * kFollowingGap)
-                        continue;
-                    gapAhead = std::min(gapAhead, target);
-                    break;
+                    const BusRoute& r = routes_[bus.route];
+                    const auto it = std::upper_bound(r.distance.begin(), r.distance.end(),
+                                                     std::fmod(bus.position, r.length));
+                    const std::size_t next = static_cast<std::size_t>(it - r.distance.begin());
+                    if (next < r.legSegment.size() && r.legSegment[next] != 0xFFFFFFFFu)
+                    {
+                        float overSpeed = 0.0f;
+                        const float over =
+                            gapAhead(r.legSegment[next], r.legForward[next],
+                                     LaneFromOffset(r.offset[next]), 0.0f, 0xFFFFFFFFu, &overSpeed);
+                        if (toEnd + over < gap)
+                        {
+                            gap = toEnd + over;
+                            leaderSpeed = overSpeed;
+                        }
+                    }
                 }
-            }
-
-            if (gapAhead < kFollowingGap + 30.0f)
-            {
-                // Stopped at a bus length and a half, creeping in above that, and free beyond it.
-                const float allowed =
-                    std::max(0.0f, (gapAhead - kFollowingGap) / 30.0f) * kCruiseSpeed;
-                // And never far enough in one step to close the gap anyway. A capped *speed* is
-                // not a guarantee when the step is long: at a time scale of sixty a sub-step is
-                // half a simulated second and a bus covers six metres in it, so a bus thirty
-                // metres back can be nine metres back by the time the cap is next consulted.
-                const float reachable = std::max(0.0f, gapAhead - kFollowingGap) /
-                                        std::max(dt, 1e-3f);
-                bus.speed = std::min({bus.speed, allowed, reachable});
+                if (gap < kFollowingGap + 30.0f)
+                {
+                    // Stopped at a bus length and a half, creeping in above that, free beyond it,
+                    // and never far enough in one step to close the gap anyway -- a capped speed
+                    // is not a guarantee when the step is long.
+                    const float allowed =
+                        std::max(0.0f, (gap - kFollowingGap) / 30.0f) * kCruiseSpeed;
+                    const float reachable = std::max(0.0f, gap - kFollowingGap) / std::max(dt, 1e-3f);
+                    bus.speed = std::min({bus.speed, std::max(allowed, leaderSpeed), reachable});
+                }
             }
 
             bus.position += bus.speed * dt;
@@ -667,16 +710,17 @@ namespace CnaCity
             if (remaining <= 1.2f && remaining > -20.0f)
             {
                 // Is the bay free? Two routes calling at the same shelter stop within a few metres
-                // of each other, and taking the stop snaps the bus onto its exact stopping point
-                // -- so without this a bus arriving at an occupied stop teleports the last metre
-                // into the one already standing there. It holds instead and takes the stop when
-                // the bay clears, which is also what happens on a real street.
+                // of each other, and taking the stop snaps the bus onto its exact stopping point --
+                // so without this a bus arriving at an occupied stop teleports the last metre into
+                // the one already standing there. It holds instead and takes the stop when the bay
+                // clears, which is also what happens on a real street.
+                Vec2 here(0.0f, 0.0f);
+                float heading = 0.0f;
+                Placement(bus, here, heading);
                 bool bayTaken = false;
-                for (std::uint32_t other : dwelling_)
-                    bayTaken = bayTaken ||
-                               (other != index &&
-                                DistanceSq(occupancy_[other].position, occupancy_[index].position) <
-                                    kFollowingGap * kFollowingGap);
+                for (std::size_t d = 0; d < dwelling_.size() && !bayTaken; ++d)
+                    bayTaken = dwelling_[d] != index &&
+                               DistanceSq(dwellingAt_[d], here) < kFollowingGap * kFollowingGap;
                 if (bayTaken)
                 {
                     bus.speed = 0.0f;
@@ -700,6 +744,9 @@ namespace CnaCity
             bytes += stop.name.capacity() + stop.routes.capacity() * sizeof(stop.routes[0]);
         for (const BusRoute& route : routes_)
             bytes += route.signalNode.capacity() * sizeof(std::uint32_t) +
+                     route.node.capacity() * sizeof(std::uint32_t) +
+                     route.legSegment.capacity() * sizeof(std::uint32_t) +
+                     route.legForward.capacity() * sizeof(std::uint8_t) +
                      route.stops.capacity() * sizeof(std::uint32_t) +
                      route.stopDistance.capacity() * sizeof(float) +
                      route.points.capacity() * sizeof(Vec2) +

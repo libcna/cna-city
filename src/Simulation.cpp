@@ -1357,7 +1357,8 @@ namespace CnaCity
         // Buses obey the same signals the cars do, asked the same question: may a vehicle here,
         // heading there, cross the junction it is approaching? Modelling the lights a second time
         // for the buses would be two models of one thing that agree until somebody edits one.
-        buses_.Step(city_, dt, [this](Vec2 at, Vec2 ahead) { return TrafficMayProceed(at, ahead); });
+        // Where the buses are, handed to the traffic model before it rebuilds its lanes.
+        traffic_.SetObstacles(buses_.RoadOccupancy());
         stats_.busMs += ElapsedMs(watch);
 
         watch.Restart();
@@ -1378,6 +1379,20 @@ namespace CnaCity
         }
         traffic_.ClearArrivals();
         stats_.trafficMs += ElapsedMs(watch);
+
+        // The buses move *after* the traffic, and the ordering is the whole of the unification.
+        // Their positions went into the lane buckets before `Traffic::Step` rebuilt them, so the
+        // cars have just queued behind them -- and querying those same buckets now means the buses
+        // queue behind the cars, off one rebuild that both halves agree on. Stepping the buses
+        // first read the buckets from the tick before, which did not contain them.
+        watch.Restart();
+        buses_.Step(
+            city_, dt, [this](Vec2 at, Vec2 ahead) { return TrafficMayProceed(at, ahead); },
+            [this](std::uint32_t segment, std::uint8_t forward, std::uint8_t lane, float along,
+                   std::uint32_t self, float* leaderSpeed) {
+                return traffic_.GapAhead(segment, forward, lane, along, self, leaderSpeed);
+            });
+        stats_.busMs += ElapsedMs(watch);
 
         watch.Restart();
         StepMetroPassengers(dt);

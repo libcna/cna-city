@@ -116,55 +116,138 @@ namespace CnaCityTests
         EXPECT_GT(dwellsSeen, 0) << "no bus ever stopped at a stop";
     }
 
-    TEST(Buses, NoBusDrivesThroughAnotherOnItsOwnRoute)
+    TEST(Buses, NothingOnTheRoadEndsUpInsideAnythingElse)
     {
-        // Buses are not in the car-following stream -- see plan.md -- so their own look-ahead is
-        // the only thing between two of them and the same twelve metres of road, which is what a
-        // screenshot caught a red bus and a green one doing.
+        // Buses and cars share one occupancy model now: a bus publishes where it is into the road's
+        // lane buckets, so the cars behind it queue, and reads the same buckets back, so it queues
+        // behind them. Before that they were two models of the same asphalt and each drove through
+        // the other.
         //
-        // Along a route the look-ahead is exact and this asserts it. Across routes it is not, and
-        // that is the honest boundary of an ad-hoc rule: two services converging on a shared
-        // arterial from different streets see each other late, and the residual -- a few dozen
-        // moments a simulated hour, never closer than four metres -- is bounded here rather than
-        // asserted away. Putting the fleet in the IDM arrays is what would close it.
+        // "Inside each other" is measured on the road rather than in the world, which is the
+        // distinction the earlier version of this test could not make: two buses eight metres apart
+        // on two different streets that meet at a junction are not overlapping, they are at a
+        // junction. Same segment, same direction, same lane, closer than a vehicle length -- that
+        // is an overlap.
         Simulation sim;
         MakeBusCity(sim, 1000);
-        int sameRoute = 0;
-        int acrossRoutes = 0;
-        float worstDistance = 1e9f;
-        // Half-second steps, which is Simulation::kMovementStep -- the step the look-ahead is
-        // actually consulted at.
+        const float busLength = ProfileOf(VehicleKind::Bus).length;
+
+        int busIntoBus = 0;
+        int busIntoCar = 0;
+        int samples = 0;
         for (int i = 0; i < 3600; ++i)
         {
             sim.Step(0.5f);
             const std::vector<Bus>& fleet = sim.buses().buses();
-            for (std::size_t a = 0; a < fleet.size(); ++a)
+
+            struct Placed
             {
-                Vec2 pa(0.0f, 0.0f);
-                float ha = 0.0f;
-                sim.buses().Placement(fleet[a], pa, ha);
-                for (std::size_t b = a + 1; b < fleet.size(); ++b)
+                std::uint32_t segment;
+                std::uint8_t forward;
+                std::uint8_t lane;
+                float s;
+                float speed;
+            };
+            std::vector<Placed> onRoad;
+            for (const Bus& bus : fleet)
+            {
+                Placed p{};
+                if (!sim.buses().RoadPositionOf(bus, p.segment, p.forward, p.s)) continue;
+                p.lane = sim.buses().LaneOf(bus);
+                p.speed = bus.speed;
+                onRoad.push_back(p);
+            }
+
+            for (std::size_t a = 0; a < onRoad.size(); ++a)
+            {
+                for (std::size_t b = a + 1; b < onRoad.size(); ++b)
                 {
-                    Vec2 pb(0.0f, 0.0f);
-                    float hb = 0.0f;
-                    sim.buses().Placement(fleet[b], pb, hb);
-                    if (DistanceSq(pa, pb) > 144.0f) continue;
-                    // Only buses travelling the same way. Two passing on opposite carriageways are
-                    // about three metres apart, and that is a correctly modelled street.
-                    if (Dot(FromHeading(ha), FromHeading(hb)) < 0.7f) continue;
-                    if (fleet[a].speed <= 0.05f || fleet[b].speed <= 0.05f) continue;
-                    worstDistance = std::min(worstDistance, Distance(pa, pb));
-                    if (fleet[a].route == fleet[b].route) ++sameRoute;
-                    else ++acrossRoutes;
+                    if (onRoad[a].segment != onRoad[b].segment ||
+                        onRoad[a].forward != onRoad[b].forward ||
+                        onRoad[a].lane != onRoad[b].lane)
+                        continue;
+                    ++samples;
+                    if (std::abs(onRoad[a].s - onRoad[b].s) < busLength &&
+                        onRoad[a].speed > 0.05f && onRoad[b].speed > 0.05f)
+                        ++busIntoBus;
+                }
+
+                // And against the cars, which is the half that did not exist at all before.
+                for (const Vehicle& vehicle : sim.traffic().vehicles())
+                {
+                    if (!vehicle.active || vehicle.segment != onRoad[a].segment ||
+                        vehicle.forward != onRoad[a].forward || vehicle.lane != onRoad[a].lane)
+                        continue;
+                    const float half =
+                        (busLength + ProfileOf(static_cast<VehicleKind>(vehicle.kind)).length) * 0.5f;
+                    if (std::abs(vehicle.s - onRoad[a].s) < half * 0.6f && vehicle.speed > 0.05f &&
+                        onRoad[a].speed > 0.05f)
+                        ++busIntoCar;
                 }
             }
         }
-        EXPECT_EQ(sameRoute, 0)
-            << "a bus drove into the one in front of it on its own route " << sameRoute << " times";
-        EXPECT_LT(acrossRoutes, 400)
-            << "converging routes are overlapping far more than the known residual";
-        if (worstDistance < 1e8f)
-            EXPECT_GT(worstDistance, 3.5f) << "two moving buses are more than half inside each other";
+        EXPECT_GT(samples, 0) << "no two buses ever shared a lane; the test proves nothing";
+
+        // Not zero, and the bound is the honest part of this test.
+        //
+        // Sharing the occupancy model took same-lane overlaps from hundreds a run to single
+        // figures, and what is left is inherent to a bus not being integrated by the IDM itself:
+        // when it crosses a junction its position along the road jumps to the start of the next
+        // segment, and if something is standing there the two are momentarily inside each other.
+        // A car in that position is pushed back by the traffic model's own negative-gap
+        // correction, which a bus cannot have because Traffic does not own where it is.
+        //
+        // Adding a correction of the bus's own was tried and made it slightly worse -- pushing a
+        // bus back can put it inside whatever is behind. Closing this properly means moving the
+        // fleet into the IDM arrays, which is a bigger change than the one this test guards.
+        // Measured here: three thousand six hundred ticks with ninety buses is a third of a
+        // million bus-ticks, and this bounds the residual at a handful of them.
+        EXPECT_LE(busIntoBus, 6) << busIntoBus << " moving bus pairs are inside each other";
+        EXPECT_LE(busIntoCar, 6) << busIntoCar << " moving buses are inside a car";
+    }
+
+    TEST(Buses, TheCarsQueueBehindAStandingBus)
+    {
+        // The behaviour the unification is *for*, and the one a screenshot shows: a bus stopped at
+        // a stop is an obstacle in its lane, so the traffic behind it slows rather than passing
+        // through it. Before, a stationary bus was invisible to the road.
+        Simulation sim;
+        MakeBusCity(sim, 4000);
+        const float busLength = ProfileOf(VehicleKind::Bus).length;
+
+        int carsFoundBehindADwellingBus = 0;
+        int thoseThatWereSlowing = 0;
+        for (int i = 0; i < 2400; ++i)
+        {
+            sim.Step(0.5f);
+            for (const Bus& bus : sim.buses().buses())
+            {
+                if (bus.dwellRemaining <= 0.0f) continue;
+                std::uint32_t segment = 0;
+                std::uint8_t forward = 1;
+                float along = 0.0f;
+                if (!sim.buses().RoadPositionOf(bus, segment, forward, along)) continue;
+                const std::uint8_t lane = sim.buses().LaneOf(bus);
+
+                for (const Vehicle& vehicle : sim.traffic().vehicles())
+                {
+                    if (!vehicle.active || vehicle.segment != segment ||
+                        vehicle.forward != forward || vehicle.lane != lane)
+                        continue;
+                    const float behind = along - vehicle.s;
+                    if (behind < busLength || behind > busLength + 12.0f) continue;
+                    ++carsFoundBehindADwellingBus;
+                    if (vehicle.acceleration < 0.05f) ++thoseThatWereSlowing;
+                }
+            }
+        }
+        ASSERT_GT(carsFoundBehindADwellingBus, 20)
+            << "no car ever came up behind a bus at a stop; the test proves nothing";
+        // Not all of them: a car far enough back on a long segment is still accelerating quite
+        // correctly. Most of them is the claim.
+        EXPECT_GT(static_cast<double>(thoseThatWereSlowing) / carsFoundBehindADwellingBus, 0.6)
+            << thoseThatWereSlowing << " of " << carsFoundBehindADwellingBus
+            << " cars close behind a stopped bus were still speeding up";
     }
 
     TEST(Buses, NoBusIsStuckForever)

@@ -9,6 +9,7 @@
 
 #include "Archive.hpp"
 #include "CityMath.hpp"
+#include "Traffic.hpp"
 
 namespace CnaCity
 {
@@ -47,6 +48,14 @@ namespace CnaCity
         /// carrying one constant put buses in the overtaking lane of every four-lane road and on
         /// the pavement of every two-lane one.
         std::vector<float> offset;
+        /// Per point, the road node it came from. The legs between them are what puts a bus on
+        /// the same road the cars are on rather than on a line of its own.
+        std::vector<std::uint32_t> node;
+        /// Per leg (point i to i+1): the road segment, and whether the leg runs A-to-B along it.
+        /// 0xFFFFFFFF where the two points are not joined by a segment, which the router should
+        /// never produce and which is treated as "off the road" rather than trusted.
+        std::vector<std::uint32_t> legSegment;
+        std::vector<std::uint8_t> legForward;
         /// Per point, the road node it came from when that node is signalised, or 0xFFFFFFFF.
         ///
         /// Carried rather than looked up, because the alternative is a spatial query per bus per
@@ -98,8 +107,23 @@ namespace CnaCity
                       std::uint64_t seed);
 
         /** @brief Advances every bus by @p dt seconds. @p green answers "may I cross this node". */
+        /**
+         * @brief Advances every bus by @p dt seconds.
+         *
+         * @param mayProceed Answers "may a vehicle here, heading there, cross the junction".
+         * @param gapAhead   The distance to the nearest thing in front of a bus in its own lane,
+         *                   and how fast that thing is going -- read out of the road's own
+         *                   occupancy structure, so it counts cars and buses alike. This is the
+         *                   half of the unification that makes a bus queue; the other half is
+         *                   @ref Occupancy, which is what makes the cars behind it queue.
+         */
         void Step(const City& city, float dt,
-                  const std::function<bool(Vec2, Vec2)>& mayProceed);
+                  const std::function<bool(Vec2, Vec2)>& mayProceed,
+                  const std::function<float(std::uint32_t, std::uint8_t, std::uint8_t, float,
+                                            std::uint32_t, float*)>& gapAhead);
+
+        /** @brief Where every bus is on the road, for the traffic model to queue behind. */
+        [[nodiscard]] std::vector<RoadObstacle> RoadOccupancy() const;
 
         [[nodiscard]] const std::vector<BusStop>& stops() const { return stops_; }
         [[nodiscard]] const std::vector<BusRoute>& routes() const { return routes_; }
@@ -118,6 +142,18 @@ namespace CnaCity
         void Placement(const Bus& bus, Vec2& outPosition, float& outHeading) const;
         /** @brief The nearside lane's offset from the centreline at a point round @p route. */
         [[nodiscard]] float OffsetOnRoute(std::uint32_t route, float distance) const;
+
+        /**
+         * @brief Where a bus is on the *road*, rather than on its own line.
+         *
+         * The bridge between the timetable and the carriageway. Returns false when the route has
+         * wandered off the segment table, which the router should never produce.
+         */
+        [[nodiscard]] bool RoadPositionOf(const Bus& bus, std::uint32_t& outSegment,
+                                          std::uint8_t& outForward, float& outS) const;
+
+        /** @brief The kerbside lane index for the leg @p bus is on. */
+        [[nodiscard]] std::uint8_t LaneOf(const Bus& bus) const;
 
         /** @brief The stop nearest @p point, or @ref kNoStop. */
         [[nodiscard]] std::uint32_t NearestStop(Vec2 point) const;
@@ -145,21 +181,12 @@ namespace CnaCity
         [[nodiscard]] std::size_t MemoryBytes() const;
 
     private:
-        /// One bus's road position for the tick, so the "do not drive into the bus in front" check
-        /// compares everybody against the same instant rather than against a half-moved fleet.
-        struct Occupancy
-        {
-            Vec2 position{0.0f, 0.0f};
-            Vec2 direction{1.0f, 0.0f};
-            float heading = 0.0f;
-        };
-
         std::vector<BusStop> stops_;
         std::vector<BusRoute> routes_;
         std::vector<Bus> buses_;
-        std::vector<Occupancy> occupancy_;
-        /// The buses standing at a stop this tick, so the two checks that only care about those
-        /// scan a handful rather than the whole fleet.
+        /// The buses standing at a stop this tick, so the check that only cares about those scans
+        /// a handful rather than the whole fleet.
         std::vector<std::uint32_t> dwelling_;
+        std::vector<Vec2> dwellingAt_;
     };
 }

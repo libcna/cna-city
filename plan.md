@@ -155,12 +155,8 @@ could see the city through, and the buses did not exist as a service at all.
 
 ### Known and not fixed
 
-- **Buses are not in the car-following stream.** They obey the signals but do not queue behind
-  cars, and cars do not queue behind them. Putting them in `Traffic` means giving each one a driver
-  agent out of the population, which would distort every demographic number on the HUD; the honest
-  alternative is a second vehicle class in the IDM arrays, and that is a larger change than this
-  round of work. What is visible from the pavement -- a bus stopping at a red, pulling in, dwelling
-  and pulling out -- is modelled; what is not is a bus blocking the lane it is stopped in.
+- **Buses are not in the car-following stream.** *(Closed in P16 -- they now share the road's
+  occupancy model, which is the half of this that was visible.)*
 
 ---
 
@@ -414,3 +410,51 @@ two machines meant comparing two scrollbacks.
 The comparison machinery is done and tested; what has not been done is spending the disk and the
 compilation on a second renderer. That is a decision about this machine rather than about the code,
 and the script makes it one command when somebody wants it.
+
+---
+
+## P16 — One occupancy model for the road
+
+The thing left over from the buses: they obeyed the signals but nothing else. A bus did not queue
+behind a car, a car did not queue behind a bus, and a bus standing at a stop was invisible to the
+lane it was standing in.
+
+The cause was two models of the same asphalt. `Traffic` kept vehicles in per-lane buckets sorted by
+distance along the segment; `BusNetwork` kept buses as an arc length along a polyline, with an
+all-pairs scan of its own to stop them driving through each other. Neither could see the other,
+because neither was written in the other's terms.
+
+- [x] **P16.1 A bus knows where it is on the road, not only on its line.** Routes carry the road
+  node behind every point and the segment between consecutive points, so an arc length maps to
+  (segment, direction, offset) exactly rather than by proximity.
+
+- [x] **P16.2 One structure, published to and read from by both.** `Traffic::SetObstacles` puts the
+  buses into the lane buckets, so the cars behind them queue -- and `Traffic::GapAhead` reads the
+  same buckets back, so the buses queue too. The all-pairs bus-versus-bus scan is deleted: it falls
+  out of the shared structure, and it never could see a car anyway. *Accept:* a screenshot of a
+  queue behind a bus at a stop, and a test that most cars close behind a dwelling bus are slowing.
+
+- [x] **P16.3 The ordering is the unification.** The buses move *after* the traffic. Their
+  positions go in before `Traffic::Step` rebuilds the lanes, so the cars queue behind them; the
+  buses then read those same buckets, so both halves work off one rebuild they agree on. Stepping
+  the buses first read the buckets from the tick before, which did not contain them -- which is
+  what the first attempt did, and it looked like the whole thing had not worked.
+
+- [x] **P16.4 Over the junction as well.** Lane buckets are per segment, so a bus at the end of one
+  cannot see the queue that starts at the beginning of the next -- the same blind spot the cars
+  have, which their junction pass handles. One extra query when the end is close, in the *next*
+  leg's lane rather than the current one, because a route turning from a collector onto an arterial
+  changes which lane is the kerbside one.
+
+### The residual, and why it stops here
+
+Same-lane overlaps went from hundreds a run to single figures over a third of a million bus-ticks.
+What is left is inherent: when a bus crosses a junction its position jumps to the start of the next
+segment, and if something is standing there the two are momentarily inside each other. A car in
+that position is pushed back by the traffic model's own negative-gap correction; a bus cannot have
+one, because `Traffic` does not own where it is. A correction of the bus's own was tried and made
+it slightly worse -- pushing a bus back can put it inside whatever is behind.
+
+Closing it properly means moving the fleet into the IDM arrays, with the junction pass asking the
+bus route for the next segment instead of asking a driver's path. That is a bigger change than the
+one this bought, and the test bounds the residual rather than pretending it is not there.

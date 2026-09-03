@@ -65,6 +65,25 @@ namespace CnaCity
     };
 
     /**
+     * @brief Something on the carriageway that Traffic does not itself move.
+     *
+     * A bus is the only one so far. It is driven by a timetable rather than by a route, so its
+     * motion belongs to BusNetwork -- but *where it is* belongs to the road, and until both models
+     * shared one occupancy structure a bus and a car could stand in the same four metres of
+     * asphalt without either noticing. Publishing an obstacle puts it in the lane buckets, so the
+     * cars behind it queue; querying @ref GapAhead reads the same buckets back, so it queues too.
+     */
+    struct RoadObstacle
+    {
+        std::uint32_t segment = 0;
+        float s = 0.0f;
+        float speed = 0.0f;
+        float length = 12.0f;
+        std::uint8_t forward = 1;
+        std::uint8_t lane = 0;
+    };
+
+    /**
      * @brief Everything that happens on the carriageway: signals, car-following, junctions.
      *
      * The car-following model is Treiber's Intelligent Driver Model, unchanged from the published
@@ -80,6 +99,29 @@ namespace CnaCity
 
         /** @brief Advances the signal cycle. Cheap, and deliberately separate from the vehicles. */
         void StepSignals(float dt);
+
+        /**
+         * @brief Replaces the set of things on the road that Traffic does not move itself.
+         *
+         * Published before @ref Step, consumed by the lane rebuild inside it. They take part in
+         * car-following exactly as vehicles do -- a car finds one in front of it and queues -- but
+         * nothing here ever writes to one.
+         */
+        void SetObstacles(std::vector<RoadObstacle> obstacles) { obstacles_ = std::move(obstacles); }
+
+        /**
+         * @brief The gap from @p s to the nearest thing ahead in that lane, and how fast it is.
+         *
+         * The counterpart of @ref SetObstacles, and the half that lets a bus queue behind a car.
+         * Returns a very large gap when the lane is clear ahead.
+         */
+        /// @param selfObstacle The caller's own index in the published obstacle list, so it does
+        ///        not queue behind itself -- and so that two things at exactly the same point can
+        ///        be ordered at all. An exact overlap has no "ahead", and without a tiebreak both
+        ///        parties yield to each other and neither moves again.
+        [[nodiscard]] float GapAhead(std::uint32_t segment, std::uint8_t forward, std::uint8_t lane,
+                                     float s, std::uint32_t selfObstacle = 0xFFFFFFFFu,
+                                     float* outLeaderSpeed = nullptr) const;
 
         /** @brief One vehicle tick: car-following in parallel, then junctions in order. */
         void Step(const City& city, Agents& agents, const RoutePool& routes, float dt,
@@ -168,6 +210,30 @@ namespace CnaCity
         /// deliberately rather than something that happens by accident.
         std::vector<float> signalOffset_;
         float signalClock_ = 0.0f;
+
+        /// Published by another subsystem each tick; indices at or past `vehicles_.size()` in the
+        /// lane buckets refer into this rather than into the fleet.
+        std::vector<RoadObstacle> obstacles_;
+
+        /// One lane entry, resolved from an index that may name a vehicle or an obstacle. Both
+        /// take part in car-following and only one of them is ours to move.
+        struct LaneEntry
+        {
+            float s = 0.0f;
+            float speed = 0.0f;
+            float length = 4.5f;
+        };
+        [[nodiscard]] LaneEntry EntryAt(std::uint32_t index) const;
+
+        /// Just the offset, for the insertion sort. That sort is the hottest loop in the whole
+        /// traffic model and it runs on every lane on every sub-step; giving it the full entry --
+        /// three floats and a profile lookup per comparison -- made the test suite four times
+        /// slower on its own.
+        [[nodiscard]] float SortKeyAt(std::uint32_t index) const
+        {
+            return index < vehicles_.size() ? vehicles_[index].s
+                                            : obstacles_[index - vehicles_.size()].s;
+        }
 
         std::vector<std::uint32_t> junctionQueue_;
         std::vector<std::uint32_t> arrivals_;
