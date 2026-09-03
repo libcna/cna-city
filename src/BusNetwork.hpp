@@ -135,8 +135,18 @@ namespace CnaCity
         [[nodiscard]] std::size_t MemoryBytes() const;
 
     private:
+        /// One bus's road position for the tick, so the "do not drive into the bus in front" check
+        /// compares everybody against the same instant rather than against a half-moved fleet.
+        struct Occupancy
+        {
+            Vec2 position{0.0f, 0.0f};
+            Vec2 direction{1.0f, 0.0f};
+            float heading = 0.0f;
+        };
+
         std::vector<BusStop> stops_;
         std::vector<BusRoute> routes_;
         std::vector<Bus> buses_;
+        std::vector<Occupancy> occupancy_;
     };
 }

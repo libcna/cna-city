@@ -469,8 +469,23 @@ namespace CnaCity
                           const std::function<bool(Vec2, Vec2)>& mayProceed)
     {
         (void)city;
-        for (Bus& bus : buses_)
+
+        // Where every bus is, before any of them moves. Buses are not in the car-following stream
+        // -- see the class comment -- so nothing else stops two of them occupying the same twelve
+        // metres of road, and two routes sharing an arterial did exactly that: a red bus driving
+        // through a green one, in the middle of the shot. This is not car-following, it is one
+        // rule -- do not drive into the bus in front -- and at ninety-four buses the all-pairs
+        // check costs less than the route lookup that follows it.
+        occupancy_.resize(buses_.size());
+        for (std::size_t b = 0; b < buses_.size(); ++b)
         {
+            Placement(buses_[b], occupancy_[b].position, occupancy_[b].heading);
+            occupancy_[b].direction = FromHeading(occupancy_[b].heading);
+        }
+
+        for (std::size_t index = 0; index < buses_.size(); ++index)
+        {
+            Bus& bus = buses_[index];
             const BusRoute& route = routes_[bus.route];
             if (route.stops.size() < 2) continue;
 
@@ -496,6 +511,29 @@ namespace CnaCity
                 continue;
             }
             bus.redLightSeconds = 0.0f;
+
+            // The bus in front, if there is one within a vehicle length and a half and roughly
+            // ahead rather than beside or behind. `blocked` is not a full gap model -- there is no
+            // desired following distance and no smooth approach -- because it does not need to be:
+            // buses on the same road are rare, and the only artefact worth removing is two of them
+            // in the same place.
+            bool blocked = false;
+            for (std::size_t other = 0; other < buses_.size() && !blocked; ++other)
+            {
+                if (other == index) continue;
+                const Vec2 delta = occupancy_[other].position - occupancy_[index].position;
+                const float ahead = Dot(delta, occupancy_[index].direction);
+                if (ahead < 1.0f || ahead > 18.0f) continue;
+                if (std::abs(Dot(delta, Perp(occupancy_[index].direction))) > 2.6f) continue;
+                blocked = true;
+            }
+            if (blocked)
+            {
+                bus.speed = std::max(0.0f, bus.speed - kAcceleration * 2.5f * dt);
+                bus.position += bus.speed * dt;
+                if (bus.position >= route.length) bus.position -= route.length;
+                continue;
+            }
 
             float target = route.stopDistance[bus.nextStop] - bus.position;
             if (target < 0.0f) target += route.length;
