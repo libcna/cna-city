@@ -127,39 +127,6 @@ namespace CnaCity
         indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
     }
 
-    void MeshData::AddPrism(const std::vector<Vec2>& outline, float baseY, float height, float uvScale)
-    {
-        const std::size_t n = outline.size();
-        if (n < 3) return;
-        const float top = baseY + height;
-        float uCursor = 0.0f;
-        for (std::size_t i = 0; i < n; ++i)
-        {
-            const Vec2 a2 = outline[i];
-            const Vec2 b2 = outline[(i + 1) % n];
-            const Vec2 edge = b2 - a2;
-            const float width = Length(edge);
-            if (width < 1e-3f) continue;
-            const Vec2 outward = Normalized(Perp(edge)) * -1.0f;
-            const Vector3 normal(outward.X, 0.0f, outward.Y);
-            const float uEnd = uCursor + width * uvScale;
-            AddQuad(ToWorld(a2, baseY), ToWorld(b2, baseY), ToWorld(b2, top), ToWorld(a2, top),
-                    normal, Vec2(uCursor, 0.0f), Vec2(uEnd, height * uvScale));
-            uCursor = uEnd;
-        }
-
-        // A fan from the first vertex. Correct for the convex outlines this is called with, and
-        // the block insets that produce them are rejected when they stop being convex enough.
-        const auto base = static_cast<std::uint32_t>(vertices.size());
-        const Vector3 up(0.0f, 1.0f, 0.0f);
-        const Vector4 tangent = TangentFor(up, Vector3(1.0f, 0.0f, 0.0f));
-        for (const Vec2& p : outline)
-            vertices.emplace_back(ToWorld(p, top), up, tangent,
-                                  Vector2(p.X * uvScale, p.Y * uvScale));
-        for (std::uint32_t i = 1; i + 1 < n; ++i)
-            indices.insert(indices.end(), {base, base + i, base + i + 1});
-    }
-
     void MeshData::AddCylinder(Vec2 center, float baseY, float radius, float height, int sides,
                                Vec2 uvMin, Vec2 uvMax, bool cap)
     {

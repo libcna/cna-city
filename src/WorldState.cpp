@@ -199,7 +199,11 @@ namespace CnaCity
     void Weather::Update(float simulatedSeconds, float hourOfDay)
     {
         remaining_ -= simulatedSeconds;
-        if (remaining_ <= 0.0f) PickTarget();
+        if (remaining_ <= 0.0f)
+        {
+            if (randomChanges_) PickTarget();
+            else remaining_ = 3600.0f;   // held; re-armed so the counter does not run away
+        }
 
         // A five-minute time constant on a change of weather. Anything faster is a cut, and a cut
         // is exactly what a demo about atmosphere must not do.

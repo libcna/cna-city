@@ -65,9 +65,7 @@ namespace CnaCity
             std::uint64_t corridorFallbacks = 0;   ///< Restricted searches that had to be retried city-wide.
         };
         [[nodiscard]] const Stats& stats() const { return stats_; }
-        void ResetStats() { stats_ = Stats{}; }
 
-        [[nodiscard]] std::size_t cacheEntryCount() const { return cacheEntries_; }
         [[nodiscard]] std::size_t cacheBytes() const;
 
         /** @brief Empties the cache; used when the benchmark changes scale. */
@@ -96,6 +94,8 @@ namespace CnaCity
         std::vector<std::uint8_t> corridor_;      ///< Per district: 1 when the restricted search may enter.
         std::vector<float> districtG_;
         std::vector<std::uint16_t> districtFrom_;
+        std::vector<std::uint8_t> districtClosed_;
+        std::vector<std::uint8_t> corridorScratch_;
 
         // --- Level 1 ---------------------------------------------------------------------------
         // Reused across queries and stamped rather than cleared: memset-ing two arrays the size of

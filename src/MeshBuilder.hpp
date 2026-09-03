@@ -85,9 +85,6 @@ namespace CnaCity
         void AddRibbon(Vec2 from, Vec2 to, float halfWidth, float y, float uStart, float uEnd,
                        float vMin, float vMax);
 
-        /** @brief A closed vertical prism from an arbitrary convex-ish polygon. */
-        void AddPrism(const std::vector<Vec2>& outline, float baseY, float height, float uvScale);
-
         /** @brief A cylinder around the Y axis; @p sides 6 is plenty for a lamp post. */
         void AddCylinder(Vec2 center, float baseY, float radius, float height, int sides,
                          Vec2 uvMin, Vec2 uvMax, bool cap);

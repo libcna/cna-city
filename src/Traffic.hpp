@@ -148,6 +148,8 @@ namespace CnaCity
         /// it. Refreshed every tick from the buckets and updated as cars are spawned, because
         /// several may join the same street between two ticks.
         std::vector<float> laneRearS_;
+        /// Counting-sort cursor, kept rather than rebuilt: RebuildLanes runs every sub-step.
+        std::vector<std::uint32_t> laneCursor_;
 
         /// Per incidence: which of the two signal phases the approach belongs to.
         std::vector<std::uint8_t> signalGroup_;

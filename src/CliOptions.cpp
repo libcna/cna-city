@@ -76,8 +76,8 @@ namespace CnaCity
             "  --cars F              Share of adults with a car, 0..1 (default 0.62)\n"
             "  --time H              Start hour, 0..24, fractional allowed (default 6.5)\n"
             "  --timescale F         Simulated seconds per real second (default 60: a day in 24 min)\n"
-            "  --weather NAME        clear, partly, overcast, rain, storm, fog, snow\n"
-            "  --fixed-weather       Do not let the weather change on its own\n"
+            "  --weather NAME        clear, partly, overcast, rain, storm, fog, snow; also pins it\n"
+            "  --fixed-weather       Pin whatever weather the seed starts with\n"
             "  --threads N           Worker threads (default: as many as the machine has)\n"
             "\n"
             "Presentation\n"
@@ -136,6 +136,10 @@ namespace CnaCity
                     options.error = "--weather: unknown weather (try clear, rain, fog, snow)";
                     return false;
                 }
+                // Naming a weather also pins it. Somebody who asks for rain wants to look at
+                // rain, not at whatever the forecast wanders into ninety seconds later -- which is
+                // exactly what made a set of screenshots taken in one batch disagree about what
+                // the weather was.
                 options.sim.randomWeather = false;
             }
             else if (arg == "--fixed-weather") options.sim.randomWeather = false;

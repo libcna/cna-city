@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,9 @@ namespace CnaCity
     {
     public:
         Simulation();
+        ~Simulation();
+        Simulation(const Simulation&) = delete;
+        Simulation& operator=(const Simulation&) = delete;
 
         void Initialize(const SimConfig& config);
 
@@ -99,7 +103,7 @@ namespace CnaCity
         [[nodiscard]] const SimStats& stats() const { return stats_; }
         [[nodiscard]] std::uint64_t tick() const { return tick_; }
         [[nodiscard]] const RoutePool& routes() const { return routes_; }
-        [[nodiscard]] int threadCount() const { return jobs_.threadCount(); }
+        [[nodiscard]] int threadCount() const { return jobs_ != nullptr ? jobs_->threadCount() : 1; }
 
         /** @brief The agents currently on foot, as indices; the renderer draws exactly these. */
         [[nodiscard]] const std::vector<std::uint32_t>& walkingAgents() const { return walking_; }
@@ -140,9 +144,21 @@ namespace CnaCity
         RoutePool routes_;
         WorldClock clock_;
         Weather weather_;
-        JobSystem jobs_;
+        /// Created in Initialize rather than in the constructor, because its width comes from the
+        /// configuration and the constructor has not seen one yet. It used to be a member built
+        /// with 0, which is why `--threads` was accepted and then ignored.
+        std::unique_ptr<JobSystem> jobs_;
         SimStats stats_;
         std::uint64_t tick_ = 0;
+        /// Simulated seconds since Initialize, and the half-second counter derived from it.
+        ///
+        /// Every per-agent decision hashes on the *epoch*, never on the tick. Hashing on the tick
+        /// made the city depend on the frame rate: a machine drawing at 120 fps stepped twice as
+        /// often and hashed twice as many times, so it produced a different set of trips from the
+        /// same seed. The epoch advances with the simulated clock and is therefore the same on any
+        /// machine and at any fixed step.
+        double simulatedSeconds_ = 0.0;
+        std::uint32_t decisionEpoch_ = 0;
         float decisionAccumulator_ = 0.0f;
         std::uint32_t decisionPass_ = 0;
 
@@ -173,5 +189,9 @@ namespace CnaCity
         std::vector<std::uint32_t> crowdStart_;
         std::vector<std::uint32_t> crowdItems_;
         std::vector<Vec2> crowdPush_;
+        /// Scratch that used to be allocated inside the tick. The crowd cursor alone is a 262 KB
+        /// vector, and it was built and thrown away once per movement sub-step.
+        std::vector<std::uint32_t> crowdCursor_;
+        std::vector<std::uint32_t> arrivedScratch_;
     };
 }

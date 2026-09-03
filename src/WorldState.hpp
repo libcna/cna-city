@@ -93,6 +93,17 @@ namespace CnaCity
         /** @brief Forces a specific weather, as the `--weather` switch and the F key do. */
         void Force(WeatherKind kind);
 
+        /**
+         * @brief Whether the weather may change on its own. On by default.
+         *
+         * `--weather rain --fixed-weather` has to still be raining a simulated day later, or the
+         * switch is decoration. The continuous parameters still drift within the kind -- fog still
+         * thickens overnight and the wind still turns -- because holding those still would make a
+         * fixed forecast look like a paused one.
+         */
+        void SetRandomChanges(bool enabled) { randomChanges_ = enabled; }
+        [[nodiscard]] bool randomChanges() const { return randomChanges_; }
+
         [[nodiscard]] WeatherKind kind() const { return kind_; }
         [[nodiscard]] float cloudiness() const { return cloudiness_; }
         [[nodiscard]] float precipitation() const { return precipitation_; }
@@ -114,6 +125,7 @@ namespace CnaCity
         Rng rng_;
         WeatherKind kind_ = WeatherKind::PartlyCloudy;
         float remaining_ = 0.0f;
+        bool randomChanges_ = true;
         float cloudiness_ = 0.35f, cloudinessTarget_ = 0.35f;
         float precipitation_ = 0.0f, precipitationTarget_ = 0.0f;
         float fogDensity_ = 0.0f, fogTarget_ = 0.0f;

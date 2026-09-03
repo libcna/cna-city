@@ -257,13 +257,13 @@ namespace CnaCity
 
         laneItems_.resize(laneStart_[laneCount]);
         std::fill(laneRearS_.begin(), laneRearS_.end(), 1e9f);
-        std::vector<std::uint32_t> cursor(laneStart_.begin(), laneStart_.end() - 1);
+        laneCursor_.assign(laneStart_.begin(), laneStart_.end() - 1);
         for (std::uint32_t i = 0; i < vehicles_.size(); ++i)
             if (vehicles_[i].active)
             {
                 const std::uint32_t lane = LaneIdOf(vehicles_[i]);
                 laneOfVehicle_[i] = lane;
-                laneItems_[cursor[lane]++] = i;
+                laneItems_[laneCursor_[lane]++] = i;
             }
         (void)city;
     }

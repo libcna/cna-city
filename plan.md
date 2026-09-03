@@ -31,19 +31,19 @@ the lamps *are* real lights, `CNA-FINDINGS.md` says they cannot be. The findings
 
 ## P1 — Make the documentation true
 
-- [x] **P1.1 GPU timing.** Enable `RenderPipeline::setGpuTimingEnabledEXT` and put the per-pass
+- [ ] **P1.1 GPU timing.** Enable `RenderPipeline::setGpuTimingEnabledEXT` and put the per-pass
   timings on the HUD behind a key. *Accept:* the HUD can show a per-pass millisecond breakdown of
   the post chain, or state plainly that this renderer has no timer queries.
-- [x] **P1.2 Image-based lighting from the real sky.** `AtmosphericSky::radiance` is a static CPU
+- [ ] **P1.2 Image-based lighting from the real sky.** `AtmosphericSky::radiance` is a static CPU
   function, so the sky can be sampled into a small cube without rendering one, turned into
   irradiance and prefiltered specular by `EnvironmentProcessor`, and given to
   `PbrEffect::setImageBasedLightEXT`. Rebuilt only when the sun has moved enough to matter.
   *Accept:* ambient colour tracks the sky through the day with no hand-tuned constant, and the
   rebuild cost is on the HUD.
-- [x] **P1.3 `LodGroupEXT` for people and vehicles.** Replace the hand-rolled distance bands with
+- [ ] **P1.3 `LodGroupEXT` for people and vehicles.** Replace the hand-rolled distance bands with
   the engine's own selector. *Accept:* the three person levels and the vehicle draw distance come
   from `LodGroupEXT::select`, and the frame is unchanged.
-- [x] **P1.4 Correct what cannot be implemented.** `ClusteredForwardEffect` and `ParticleSystem`
+- [ ] **P1.4 Correct what cannot be implemented.** `ClusteredForwardEffect` and `ParticleSystem`
   claims replaced with what the program actually does and why, pointing at `CNA-FINDINGS.md`.
   *Accept:* no claim in `README.md` names a symbol that `grep -r src/` cannot find.
 
@@ -65,25 +65,25 @@ the lamps *are* real lights, `CNA-FINDINGS.md` says they cannot be. The findings
 
 ## P4 — Things a city has that this one does not
 
-- [x] **P4.1 Traffic lights that change colour.** The phase is simulated and `SignalColour` exists,
+- [ ] **P4.1 Traffic lights that change colour.** The phase is simulated and `SignalColour` exists,
   but the signal heads are drawn in one static colour, so the most legible piece of city machinery
   is invisible. *Accept:* a signal head is red, amber or green according to its own approach, and
   the change is visible from the street camera.
-- [x] **P4.2 Parked cars.** Kerbside parking is most of what makes a street look inhabited, and its
+- [ ] **P4.2 Parked cars.** Kerbside parking is most of what makes a street look inhabited, and its
   absence is why every road here reads as a bypass. *Accept:* parked vehicles line the kerb on
   local and collector streets, generated with the city and not simulated.
-- [x] **P4.3 Pedestrian crossings.** Zebra markings on the approaches to signalised junctions.
+- [ ] **P4.3 Pedestrian crossings.** Zebra markings on the approaches to signalised junctions.
   *Accept:* visible from the street camera, and aligned with the carriageway.
-- [x] **P4.4 Pitched roofs on houses.** Every building in the suburbs is a flat-topped box, which is
+- [ ] **P4.4 Pitched roofs on houses.** Every building in the suburbs is a flat-topped box, which is
   the one silhouette a suburb never has. *Accept:* `BuildingKind::House` gets a ridged roof.
-- [x] **P4.5 Facade variety.** `Building::variant` is assigned and never read. *Accept:* it selects
+- [ ] **P4.5 Facade variety.** `Building::variant` is assigned and never read. *Accept:* it selects
   between facade tints so a terrace is not one colour repeated.
-- [x] **P4.6 Snow that settles.** `Weather::snowCover` is simulated and nothing shows it.
+- [ ] **P4.6 Snow that settles.** `Weather::snowCover` is simulated and nothing shows it.
   *Accept:* ground materials whiten with the cover.
 
 ## P5 — The follow camera should be able to follow a whole day
 
-- [x] **P5.1 Keep the subject.** The camera abandons anyone who stays indoors for two and a half
+- [ ] **P5.1 Keep the subject.** The camera abandons anyone who stays indoors for two and a half
   seconds, so "watch one citizen's entire day" is exactly what it cannot do. *Accept:* a key locks
   the subject; locked, the camera waits outside their door and picks them up when they leave.
 
@@ -100,6 +100,6 @@ the lamps *are* real lights, `CNA-FINDINGS.md` says they cannot be. The findings
 
 ## P8 — Honesty about arrivals
 
-- [x] **P8.1 Drivers teleport on arrival.** `FinishTrip` moves the agent to the destination doorway
+- [ ] **P8.1 Drivers teleport on arrival.** `FinishTrip` moves the agent to the destination doorway
   from wherever the car happened to be, which for a vehicle abandoned to gridlock is a jump across
   the city. *Accept:* a driver who ends up more than a short walk from the door walks the rest.

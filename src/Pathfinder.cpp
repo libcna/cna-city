@@ -48,6 +48,8 @@ namespace CnaCity
 
         const std::size_t districtCount = city.districts().size();
         corridor_.assign(districtCount, 0);
+        corridorScratch_.assign(districtCount, 0);
+        districtClosed_.assign(districtCount, 0);
         districtG_.assign(districtCount, 0.0f);
         districtFrom_.assign(districtCount, 0);
 
@@ -93,7 +95,8 @@ namespace CnaCity
         // scan below beats a heap, and clear enough to read.
         constexpr float kInfinity = std::numeric_limits<float>::infinity();
         std::fill(districtG_.begin(), districtG_.end(), kInfinity);
-        std::vector<std::uint8_t> closed(count, 0);
+        districtClosed_.assign(count, 0);
+        std::vector<std::uint8_t>& closed = districtClosed_;
         districtG_[from] = 0.0f;
         districtFrom_[from] = from;
 
@@ -148,7 +151,8 @@ namespace CnaCity
         // Widen by one ring. A corridor exactly one cell wide is a corridor the road graph can
         // fail to follow -- a street that leaves the cell and comes straight back is normal, and a
         // search forbidden from taking it reports "unreachable" for a trip anyone could make.
-        std::vector<std::uint8_t> widened = corridor_;
+        corridorScratch_ = corridor_;
+        std::vector<std::uint8_t>& widened = corridorScratch_;
         for (std::size_t i = 0; i < count; ++i)
         {
             if (!corridor_[i]) continue;

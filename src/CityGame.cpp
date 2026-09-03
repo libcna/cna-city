@@ -323,8 +323,11 @@ namespace CnaCity
         }
         if (pressed(Keys::F))
         {
+            // Cycling by hand pins the weather: somebody who asked for snow wants to look at snow,
+            // not at whatever the forecast wanders into ninety seconds later.
             const int next = (static_cast<int>(sim_.weather().kind()) + 1) % kWeatherKindCount;
             sim_.mutableWeather().Force(static_cast<WeatherKind>(next));
+            sim_.mutableWeather().SetRandomChanges(false);
         }
         if (keys.IsKeyDown(Keys::T)) sim_.mutableClock().setHour(sim_.clock().hour() + dt * 1.4f);
         if (keys.IsKeyDown(Keys::G)) sim_.mutableClock().setHour(sim_.clock().hour() - dt * 1.4f);

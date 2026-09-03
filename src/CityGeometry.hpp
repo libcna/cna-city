@@ -54,7 +54,6 @@ namespace CnaCity
         [[nodiscard]] const std::vector<GeometryChunk>& chunks() const { return chunks_; }
         [[nodiscard]] int totalTriangles() const { return totalTriangles_; }
         [[nodiscard]] std::size_t bytes() const { return bytes_; }
-        [[nodiscard]] const Microsoft::Xna::Framework::BoundingBox& bounds() const { return bounds_; }
 
     private:
         [[nodiscard]] std::uint32_t ChunkOf(Vec2 point) const;

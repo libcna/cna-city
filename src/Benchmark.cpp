@@ -80,8 +80,9 @@ namespace CnaCity
                 result.peakTravelling = std::max(result.peakTravelling, travelling);
 
                 if (verbose && t % 600 == 0)
-                    std::printf("    %s  travelling %6u  %.2f ms\n", sim.clock().ClockText(),
-                                travelling, ms);
+                    std::printf("    %s  %-14s %2.0fC  travelling %6u  %.2f ms\n",
+                                sim.clock().ClockText(), WeatherName(sim.weather().kind()),
+                                static_cast<double>(sim.weather().temperatureC()), travelling, ms);
             }
 
             const auto count = static_cast<double>(samples.size());

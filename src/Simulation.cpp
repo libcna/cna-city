@@ -79,11 +79,14 @@ namespace CnaCity
         }
     }
 
-    Simulation::Simulation() : jobs_(0) {}
+    Simulation::Simulation() = default;
+
+    Simulation::~Simulation() = default;
 
     void Simulation::Initialize(const SimConfig& config)
     {
         config_ = config;
+        jobs_ = std::make_unique<JobSystem>(config.threads);
         city_.Generate(config.city);
         metro_.Generate(city_, config.metroLines, config.city.seed);
         pathfinder_.Build(city_);
@@ -103,10 +106,13 @@ namespace CnaCity
 
         clock_.Reset(config.startHour, config.timeScale);
         weather_.Reset(config.weather, config.city.seed ^ 0x9e37ULL);
+        weather_.SetRandomChanges(config.randomWeather);
         crowdStart_.assign(kCrowdBuckets + 1, 0);
 
         Populate();
         tick_ = 0;
+        simulatedSeconds_ = 0.0;
+        decisionEpoch_ = 0;
     }
 
     void Simulation::Populate()
@@ -138,7 +144,7 @@ namespace CnaCity
         // This one loop is where sharp-runtime's own Parallel::For is used. It is the right tool
         // here for the same reason it is the wrong one on the tick path: it runs once, over a
         // hundred thousand agents, and a thread per chunk amortises away completely.
-        const int chunks = std::max(1, jobs_.threadCount());
+        const int chunks = std::max(1, jobs_->threadCount());
         const std::size_t chunkSize = (count + chunks - 1) / static_cast<std::size_t>(chunks);
         const std::uint64_t seed = config_.city.seed;
         System::Threading::Tasks::Parallel::For(0, chunks, [&](std::int32_t chunk) {
@@ -282,7 +288,7 @@ namespace CnaCity
         // is intentionally legible rather than calibrated: the point is that the shares visibly
         // move when the weather turns or the clock reaches the peak, not that they match a
         // published survey.
-        const std::uint32_t bits = Hash(agent, static_cast<std::uint32_t>(tick_));
+        const std::uint32_t bits = Hash(agent, decisionEpoch_);
         const float aversion = weather_.WalkingAversion();
         const bool commercial = IsCommercialDriver(agent);
         const bool hasCar = agents_.OwnsCar(agent) || commercial;
@@ -298,7 +304,7 @@ namespace CnaCity
             const float centreness = 1.0f - Saturate(Length(from) / config_.city.halfSize);
             float chance = 0.86f - 0.40f * centreness + 0.14f * (aversion - 1.0f);
             chance *= Saturate(straight / 1800.0f) * 0.62f + 0.38f;
-            drive = HashFloat(agent, static_cast<std::uint32_t>(tick_ * 7 + 1)) < chance;
+            drive = HashFloat(agent, decisionEpoch_ * 7u + 1u) < chance;
         }
 
         const std::uint32_t startNode = city_.roads().FindNearestNode(from);
@@ -416,7 +422,7 @@ namespace CnaCity
         if (dayKey != lastDayReset_)
         {
             lastDayReset_ = dayKey;
-            jobs_.ParallelFor(count, 4096, [&](std::size_t begin, std::size_t end) {
+            jobs_->ParallelFor(count, 4096, [&](std::size_t begin, std::size_t end) {
                 for (std::size_t i = begin; i < end; ++i)
                     agents_.flags[i] &= static_cast<std::uint8_t>(~0x0Eu);
             });
@@ -437,7 +443,7 @@ namespace CnaCity
         // morning peak fell from six thousand to two, which is the kind of change that looks like
         // tuning and is a bug.
         const std::uint32_t stride = decisionPass_++ % kDecisionStride;
-        jobs_.ParallelFor(count, 2048, [&](std::size_t begin, std::size_t end) {
+        jobs_->ParallelFor(count, 2048, [&](std::size_t begin, std::size_t end) {
             for (std::size_t i = begin; i < end; ++i)
             {
                 if (agents_.mode[i] != static_cast<std::uint8_t>(Mode::Indoors)) continue;
@@ -462,13 +468,12 @@ namespace CnaCity
                     minuteOfDay > 285.0f && minuteOfDay < 1395.0f)
                 {
                     const std::vector<std::uint32_t>& venues =
-                        (Hash(static_cast<std::uint32_t>(i), static_cast<std::uint32_t>(tick_)) & 1u)
+                        (Hash(static_cast<std::uint32_t>(i), decisionEpoch_) & 1u)
                             ? city_.workplaces() : city_.homes();
                     if (!venues.empty())
                     {
                         destination = venues[Hash(static_cast<std::uint32_t>(i),
-                                                  static_cast<std::uint32_t>(tick_ * 31u + 7u)) %
-                                             venues.size()];
+                                                  decisionEpoch_ * 31u + 7u) % venues.size()];
                         next = Activity::ToLeisure;
                         const std::uint32_t slotIndex =
                             wantsCount_.fetch_add(1, std::memory_order_relaxed);
@@ -518,8 +523,7 @@ namespace CnaCity
                         // both wrong and, for a demo, the worst possible moment to look at.
                         if (agents_.haunt[i] != kNoIndex && minuteOfDay > 540.0f &&
                             minuteOfDay < 1140.0f &&
-                            HashFloat(static_cast<std::uint32_t>(i),
-                                      static_cast<std::uint32_t>(tick_ / 384u)) < 0.028f)
+                            HashFloat(static_cast<std::uint32_t>(i), decisionEpoch_ / 1200u) < 0.028f)
                         {
                             destination = agents_.haunt[i];
                             next = Activity::ToLeisure;
@@ -641,8 +645,9 @@ namespace CnaCity
         for (std::uint32_t agent : walking_) ++crowdStart_[bucketOf(agents_.position[agent]) + 1];
         for (std::uint32_t i = 1; i <= kCrowdBuckets; ++i) crowdStart_[i] += crowdStart_[i - 1];
         crowdItems_.resize(walking_.size());
-        std::vector<std::uint32_t> cursor(crowdStart_.begin(), crowdStart_.end() - 1);
-        for (std::uint32_t agent : walking_) crowdItems_[cursor[bucketOf(agents_.position[agent])]++] = agent;
+        crowdCursor_.assign(crowdStart_.begin(), crowdStart_.end() - 1);
+        for (std::uint32_t agent : walking_)
+            crowdItems_[crowdCursor_[bucketOf(agents_.position[agent])]++] = agent;
     }
 
     void Simulation::CollectModeLists(bool withActivityHistogram)
@@ -688,7 +693,7 @@ namespace CnaCity
         // this tick's and last tick's neighbours depending on which thread got there first, which
         // is both non-deterministic and visibly jittery.
         crowdPush_.assign(walking_.size(), Vec2(0.0f, 0.0f));
-        jobs_.ParallelFor(walking_.size(), 512, [&](std::size_t begin, std::size_t end) {
+        jobs_->ParallelFor(walking_.size(), 512, [&](std::size_t begin, std::size_t end) {
             for (std::size_t k = begin; k < end; ++k)
             {
                 const std::uint32_t agent = walking_[k];
@@ -725,8 +730,9 @@ namespace CnaCity
 
         // --- Movement ---------------------------------------------------------------------------
         std::atomic<std::uint32_t> arrivalCount{0};
-        std::vector<std::uint32_t> arrived(walking_.size(), kNoIndex);
-        jobs_.ParallelFor(walking_.size(), 512, [&](std::size_t begin, std::size_t end) {
+        arrivedScratch_.assign(walking_.size(), kNoIndex);
+        std::vector<std::uint32_t>& arrived = arrivedScratch_;
+        jobs_->ParallelFor(walking_.size(), 512, [&](std::size_t begin, std::size_t end) {
             for (std::size_t k = begin; k < end; ++k)
             {
                 const std::uint32_t agent = walking_[k];
@@ -987,7 +993,7 @@ namespace CnaCity
         stats_.walkMs += ElapsedMs(watch);
 
         watch.Restart();
-        traffic_.Step(city_, agents_, routes_, dt, jobs_);
+        traffic_.Step(city_, agents_, routes_, dt, *jobs_);
         for (std::uint32_t driver : traffic_.arrivals())
         {
             if (agents_.mode[driver] != static_cast<std::uint8_t>(Mode::Driving)) continue;
@@ -1009,6 +1015,8 @@ namespace CnaCity
         stats_.routeFailures = 0;
         stats_.walkMs = stats_.crowdMs = stats_.trafficMs = stats_.metroMs = 0.0;
 
+        simulatedSeconds_ += static_cast<double>(simulatedSeconds);
+        decisionEpoch_ = static_cast<std::uint32_t>(simulatedSeconds_ * 2.0);
         clock_.Advance(simulatedSeconds);
         weather_.Update(simulatedSeconds, clock_.hour());
 
@@ -1074,7 +1082,7 @@ namespace CnaCity
         // is empty, so the follow camera's opening shot was reliably a random person asleep in a
         // building, filmed from inside the wall.
         if (walking_.empty()) return kNoIndex;
-        return walking_[Hash(hint, static_cast<std::uint32_t>(tick_)) % walking_.size()];
+        return walking_[Hash(hint, decisionEpoch_) % walking_.size()];
     }
 
     std::size_t Simulation::MemoryBytes() const
