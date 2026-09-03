@@ -165,7 +165,11 @@ namespace CnaCity
             const float halfWidth = profile.width * 0.5f;
             const bool boxy = kind == VehicleKind::Bus || kind == VehicleKind::Truck ||
                               kind == VehicleKind::Van;
-            const float sill = 0.34f;                       // the underside, above the wheels
+            // A real car's sills come down to about a quarter of a metre and its wheels fill the
+            // arches. At 0.34 with narrow wheels the body stood clear of them and the whole thing
+            // read as a slab on four stilts -- which is exactly what a kerb full of parked cars
+            // looked like from the pavement.
+            const float sill = boxy ? 0.30f : 0.24f;
             const float bodyHeight = boxy ? profile.height - sill - 0.05f
                                           : (profile.height - sill) * 0.52f;
             mesh.AddBox(Vec2(0.0f, 0.0f), sill, Vec2(halfLength, halfWidth), bodyHeight, 0.0f,
@@ -200,7 +204,7 @@ namespace CnaCity
                               kind == VehicleKind::Van;
             const float halfLength = profile.length * 0.5f;
             const float halfWidth = profile.width * 0.5f;
-            const float sill = 0.34f;
+            const float sill = boxy ? 0.30f : 0.24f;
             const float bodyHeight = boxy ? profile.height - sill - 0.05f
                                           : (profile.height - sill) * 0.52f;
 
@@ -223,14 +227,16 @@ namespace CnaCity
 
             // Wheels: tucked under the sill and just inside the flanks, so they read as wheels in
             // arches rather than as blocks bolted to the outside.
-            const float wheelRadius = boxy ? 0.44f : 0.31f;
-            const float wheelWidth = boxy ? 0.15f : 0.10f;
+            // Wheels flush with the flanks and tall enough to reach up into the body, so the arch
+            // is a shadow under the wing rather than a gap under a floating slab.
+            const float wheelRadius = boxy ? 0.44f : 0.32f;
+            const float wheelWidth = boxy ? 0.19f : 0.15f;
             for (int fx = -1; fx <= 1; fx += 2)
                 for (int fz = -1; fz <= 1; fz += 2)
                     mesh.AddBox(Vec2(static_cast<float>(fx) * halfLength * 0.62f,
-                                     static_cast<float>(fz) * (halfWidth - wheelWidth - 0.02f)),
-                                0.0f, Vec2(wheelRadius, wheelWidth), sill + 0.10f, 0.0f,
-                                Vec2(1, 1), Vec2(0, 0), true, Vec2(1, 1), true);
+                                     static_cast<float>(fz) * (halfWidth - wheelWidth * 0.85f)),
+                                0.0f, Vec2(wheelRadius, wheelWidth), sill + wheelRadius * 0.7f,
+                                0.0f, Vec2(1, 1), Vec2(0, 0), true, Vec2(1, 1), true);
             return mesh;
         }
 

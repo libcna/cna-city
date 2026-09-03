@@ -74,9 +74,12 @@ Two things it deliberately does **not** use, and why — both are in
 | `5` | Cinematic — a slow scripted sweep, for capture. |
 
 `Tab` cycles the overlay — off, statistics, the road graph the planner actually sees, and the live
-routes of the citizens near the camera. `F` cycles the weather, `T`/`G` wind the clock, `N` picks
-another citizen to follow, `[`/`]` change the time scale, `F1` hides the HUD and `F2` bypasses the
-whole post-processing chain so you can see what it is doing.
+routes of the citizens near the camera (also `--overlay roads`). `N` picks another citizen to
+follow and **`L` locks the one you have**, so the camera waits outside their door instead of moving
+on when they go inside — which is what makes following a whole day possible. `F` cycles the weather
+and pins it, `T`/`G` wind the clock, `[`/`]` change the time scale, `P` pauses, `F1` hides the HUD,
+`F2` bypasses the whole post-processing chain so you can see what it is doing, and `F3` turns on GPU
+timer queries and breaks the post chain down pass by pass.
 
 ## Build
 
@@ -117,13 +120,13 @@ On an AMD Radeon 780M with 16 threads, at a hundred thousand citizens:
 | | |
 |---|---|
 | City generation, from one seed | **24 ms** — 204 km of road, 1 072 blocks, 11 808 buildings |
-| Simulation tick, mean / p99 | **2.29 ms / 3.70 ms** |
-| Frame, street level, 1600x900 high | **8.6 ms (116 fps)** |
-| Frame, city overview, all four shadow cascades | **14.5 ms (69 fps)** |
+| Simulation tick, mean / p99 | **2.12 ms / 3.52 ms** |
+| Frame, street level, 1600x900 high | **10.2 ms (98 fps)** |
+| Frame, city overview, all four shadow cascades | **13.9 ms (72 fps)** |
 | Total resident memory | **under 65 MB** |
 
-**A hundred times the agents costs 8.1 times the tick, not a hundred.** The route cache's hit rate
-*rises* with population — 8% at a thousand agents, 38% at a hundred thousand — because citizens do
+**A hundred times the agents costs 8.2 times the tick, not a hundred.** The route cache's hit rate
+*rises* with population — 10% at a thousand agents, 35% at a hundred thousand — because citizens do
 not have random destinations, they go to the same few thousand doorways.
 
 And which half of the program dominates depends on where the camera is: from four hundred metres up

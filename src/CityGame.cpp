@@ -562,10 +562,12 @@ namespace CnaCity
                         const RoadProfile& profile = ProfileOf(node.highestClass);
                         // Well back from the kerb: at a metre and a half the nearest parked car
                         // fills a third of the frame and the street behind it is invisible.
-                        // Back along one arm and out past the kerb, far enough that the junction
-                        // and its lights are both in frame.
+                        // Back along one arm and out to the building line. Standing a metre off
+                        // the kerb puts a twelve-metre bus two metres from the lens the first time
+                        // one stops at the light, and a bus is all you can see after that.
                         spot = spot + along * 22.0f +
-                               Perp(along) * (profile.carriagewayHalfWidth + 4.0f);
+                               Perp(along) * (profile.carriagewayHalfWidth +
+                                              profile.sidewalkWidth + 2.4f);
                     }
                 }
                 camera_.position = ToWorld(spot, 2.35f);

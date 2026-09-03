@@ -182,16 +182,17 @@ at 30 ticks per second of wall clock and a time scale of 60.
 
 | agents | setup | mean | p99 | worst | decide | walk | crowd | traffic | memory | peak travelling |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 000 | 19 ms | 0.28 ms | 0.39 ms | 8.13 ms | 0.01 | 0.01 | 0.11 | 0.15 | 7.5 MB | 80 |
-| 10 000 | 19 ms | 0.50 ms | 0.78 ms | 4.68 ms | 0.08 | 0.09 | 0.12 | 0.17 | 9.0 MB | 715 |
-| 50 000 | 26 ms | 1.47 ms | 2.38 ms | 11.45 ms | 0.30 | 0.41 | 0.24 | 0.26 | 15.9 MB | 3 977 |
-| 100 000 | 24 ms | 2.29 ms | 3.70 ms | 7.71 ms | 0.51 | 0.53 | 0.33 | 0.40 | 24.5 MB | 9 102 |
+| 1 000 | 19 ms | 0.26 ms | 0.35 ms | 6.51 ms | 0.01 | 0.02 | 0.10 | 0.13 | 7.6 MB | 111 |
+| 10 000 | 18 ms | 0.54 ms | 0.89 ms | 2.70 ms | 0.05 | 0.17 | 0.13 | 0.15 | 9.2 MB | 917 |
+| 50 000 | 23 ms | 1.56 ms | 3.53 ms | 10.28 ms | 0.23 | 0.53 | 0.32 | 0.27 | 16.1 MB | 4 527 |
+| 100 000 | 27 ms | 2.12 ms | 3.52 ms | 12.06 ms | 0.40 | 0.57 | 0.40 | 0.36 | 24.7 MB | 9 255 |
 
-**A hundred times the agents costs 8.1 times the tick.** That is not an accident and it is the most
+**A hundred times the agents costs 8.2 times the tick.** That is not an accident and it is the most
 interesting number the program produces: the route cache's hit rate *rises* with population — 8% at
 a thousand agents, 23% at ten thousand, 32% at fifty thousand, 38% at a hundred thousand — because
 citizens do not have uniformly random destinations. They go to the same few thousand doorways, and
-the more of them there are the more often somebody has already made the trip. The cost that scales
+the more of them there are the more often somebody has already made the trip -- 10% at a thousand
+agents, 26% at ten thousand, 33% at fifty thousand, 35% at a hundred thousand. The cost that scales
 linearly is the movement of the people actually outdoors, and at the morning peak that is 9% of the
 population rather than all of it.
 
@@ -201,6 +202,24 @@ cost of a plan, about 13 microseconds averaged over cache hits and misses -- and
 overflow. Before that budget existed at its current size, a single decision pass on the evening peak
 cost **11.6 ms**, which was the largest item in the frame and larger than the entire renderer.
 
+### Threads
+
+The same six simulated hours at a hundred thousand agents, varying only `--threads`:
+
+| threads | mean tick | of which walking |
+|---:|---:|---:|
+| 1 | 2.61 ms | 1.02 ms |
+| 2 | 2.22 ms | 0.67 ms |
+| 4 | 2.10 ms | 0.50 ms |
+| 8 | 2.08 ms | 0.46 ms |
+
+**The parallel half saturates at about four threads, and the whole tick gains twenty per cent.**
+That is Amdahl rather than a defect, and the two halves it separates are worth naming: route
+planning, the mode lists and the crowd-grid build are serial by construction, and the parallel part
+-- moving the people who are outdoors -- is memory-bound rather than compute-bound, because it
+reaches into the agent arrays through a spatial hash. Eight threads waiting on the same cache
+misses is not eight times the work.
+
 ### Rendering
 
 1600 × 900, high quality, `--agents 100000`, all four shadow cascades, HDR with ACES, bloom and
@@ -209,14 +228,19 @@ FXAA.
 Taken at 07:30 on a city that has been running long enough to have 15 000 people at work, 2 800 on
 foot, 1 900 driving at a mean 2.1 m/s with 177 of them queuing, and 550 on the underground.
 
-| view | frame | simulation | draw | shadows | scene | draws | triangles |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| city overview, 400 m up | 13.4 ms (75 fps) | 2.3 ms | 11.8 ms | 5.0 ms | 5.2 ms | 460 | 168 k |
-| street level, morning rush | 9.4 ms (107 fps) | 3.8 ms | 7.8 ms | 2.1 ms | 2.2 ms | 153 | 32 k |
-| chase camera on one citizen | 6.9 ms (145 fps) | 1.2 ms | 4.4 ms | 1.1 ms | 1.2 ms | 141 | 20 k |
-| street level, night, in the rain | 9.1 ms (110 fps) | 2.4 ms | 7.3 ms | 2.2 ms | 2.1 ms | 148 | 32 k |
+| view | frame | simulation | draw | shadows | prepass | scene | draws | triangles |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| city overview, 400 m up | 13.9 ms (72 fps) | 2.0 ms | 12.8 ms | 5.0 ms | — | 5.0 ms | 537 | 181 k |
+| street level, morning rush | 10.2 ms (98 fps) | 2.0 ms | 7.1 ms | 1.7 ms | 0.8 ms | 1.5 ms | 187 | 43 k |
+| a junction with the lights on | 5.1 ms (195 fps) | 0.5 ms | 4.3 ms | 1.2 ms | 0.5 ms | 1.0 ms | 174 | 40 k |
 
-Adding the SSAO prepass costs a further 0.9 ms at street level, for 88 fps rather than 107.
+Ambient occlusion switches itself off above roof height, which is why the overview has no prepass
+line: it is a contact effect, and from four hundred metres up one screen pixel is several metres of
+pavement. That returns 2.9 ms, about a fifth of the frame.
+
+The environment rebuild is the one visible hitch: 11–15 ms, three or four times in a simulated day,
+whenever the sun has moved far enough that the ambient would otherwise be stale. It is on the HUD
+rather than hidden.
 
 The simulation and the draw are serial here, and which of them dominates depends entirely on where
 the camera is: from four hundred metres up the four shadow cascades and the visible chunk count put
