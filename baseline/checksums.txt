@@ -1,0 +1,5 @@
+# scenario city agents traffic transit world final
+# Reproduce one by hand:
+#   ./build/cna-city --checksum --seed S --agents N --size H --metro M --simulate D
+generator 49f2c06da5300a2e 998c42b1ea2b2160 db927d654f437296 aa365bae1d1cd25e bd4758963f5cd02d c626b0a153c4c918
+oversubscribed b75c556cd0dfdb52 0be16292702714ca 6262b22bee76b2ed 112c61126116ce41 13aa84e433420c7a 7b3a7cd4593f9b49

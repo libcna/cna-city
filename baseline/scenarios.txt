@@ -1,0 +1,2 @@
+generator|20260902|2000|1650|5|1h
+oversubscribed|4242|8000|620|3|24h

@@ -1,0 +1,10 @@
+# What these digests were produced by. Every line here is a reason a digest is allowed to differ.
+cna-city         60ab47beefd8b75fe4046781b25ac70f1937d00a (2 uncommitted files)
+cnanext          c9d8bfd85d9fe28be2586227367bc09db1aa83a3 (clean)
+sharp-runtimenext c3fbb95872414181d88315f9d4af6fa1707ed744 (clean)
+compiler         c++ (Debian 14.2.0-19) 14.2.0
+cmake            cmake version 3.31.6
+build-type       Release
+renderer         OPENGLES3
+cnaext           ON
+captured         2026-09-03T22:33:50Z
