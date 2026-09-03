@@ -96,6 +96,95 @@ namespace CnaCity
         FinishRecording();
     }
 
+    void CityGame::StepRenderReport()
+    {
+        // A fixed tour, chosen for contrast rather than for coverage: an overview where the four
+        // shadow cascades and the visible chunk count dominate, a street where the simulation is
+        // the larger half even with almost nothing on screen, and a junction where neither is.
+        // Which of the two halves dominates depending on where the camera is *is* the result this
+        // program exists to produce, so the tour has to include both ends of it.
+        static const RenderProbe kProbes[] = {
+            {"city overview", CameraMode::Free, Vector3(0.0f, 400.0f, 900.0f), -1.5708f, -0.42f},
+            {"downtown skyline", CameraMode::Orbit, Vector3(0.0f, 0.0f, 0.0f), 0.0f, 0.0f},
+            {"street level", CameraMode::Free, Vector3(120.0f, 6.0f, 40.0f), 0.35f, -0.05f},
+            {"a signalised junction", CameraMode::Free, Vector3(-470.0f, 12.0f, 20.0f), 1.9f, -0.30f},
+        };
+        constexpr int kProbeCount = static_cast<int>(std::size(kProbes));
+
+        const int warmUp = std::max(30, options_.reportFrames / 2);
+        const int measured = std::max(30, options_.reportFrames);
+
+        if (reportProbe_ < 0 || reportFrame_ >= warmUp + measured)
+        {
+            // Bank the probe that just finished.
+            if (reportProbe_ >= 0 && reportProbe_ < kProbeCount)
+            {
+                const double frames = static_cast<double>(measured);
+                RenderingRow row = reportAccum_;
+                row.view = kProbes[reportProbe_].name;
+                row.width = options_.windowWidth;
+                row.height = options_.windowHeight;
+                row.quality = QualityName(options_.quality);
+                row.frameMs /= frames;
+                row.simulationMs /= frames;
+                row.drawMs /= frames;
+                row.shadowMs /= frames;
+                row.prepassMs /= frames;
+                row.sceneMs /= frames;
+                row.instanceMs /= frames;
+                row.drawCalls = static_cast<std::uint32_t>(row.drawCalls / frames);
+                row.triangles = static_cast<std::uint32_t>(row.triangles / frames);
+                renderingRows_.push_back(row);
+
+                // The GPU's own view of the post chain, from CNA's timer queries rather than from
+                // this program's stopwatch: a CPU-side timer around a draw call measures when the
+                // driver returned, not when the work finished.
+                if (pipeline_ != nullptr)
+                    for (const auto& pass : pipeline_->getPassTimingsEXT())
+                        passRows_.push_back(
+                            PassRow{kProbes[reportProbe_].name, pass.Name, pass.Milliseconds});
+            }
+
+            ++reportProbe_;
+            reportFrame_ = 0;
+            reportAccum_ = RenderingRow{};
+            if (reportProbe_ >= kProbeCount)
+            {
+                Exit();
+                return;
+            }
+
+            const RenderProbe& probe = kProbes[reportProbe_];
+            cameraMode_ = probe.camera;
+            if (probe.camera == CameraMode::Free)
+            {
+                camera_.position = probe.position;
+                camera_.yaw = probe.yaw;
+                camera_.pitch = probe.pitch;
+            }
+            if (pipeline_ != nullptr) pipeline_->setGpuTimingEnabledEXT(true);
+            gpuTiming_ = true;
+            std::printf("  %-22s ", probe.name);
+            std::fflush(stdout);
+        }
+
+        if (reportFrame_ >= warmUp)
+        {
+            reportAccum_.frameMs += smoothedFrameMs_;
+            reportAccum_.simulationMs += simMs_;
+            reportAccum_.drawMs += frameMs_;
+            reportAccum_.shadowMs += shadowMs_;
+            reportAccum_.prepassMs += prepassMs_;
+            reportAccum_.sceneMs += sceneMs_;
+            reportAccum_.instanceMs += instanceMs_;
+            reportAccum_.drawCalls += static_cast<std::uint32_t>(drawCalls_);
+            reportAccum_.triangles += static_cast<std::uint32_t>(visibleTriangles_);
+        }
+        if (reportFrame_ == warmUp + measured - 1)
+            std::printf("%.1f ms\n", reportAccum_.frameMs / std::max(1, measured));
+        ++reportFrame_;
+    }
+
     void CityGame::FinishRecording()
     {
         if (!options_.savePath.empty() && !savedSnapshot_)
@@ -965,7 +1054,11 @@ namespace CnaCity
         const float clamped = Clamp(dt, 0.0f, 0.1f);
         ++frameCount_;
 
-        HandleInput(clamped);
+        // The scripted render benchmark drives the camera itself, so it runs instead of the input
+        // handling rather than alongside it -- a keypress arriving mid-measurement would move the
+        // viewpoint the numbers are about.
+        if (options_.renderReport) StepRenderReport();
+        else HandleInput(clamped);
 
         System::Diagnostics::Stopwatch watch;
         watch.Start();

@@ -251,6 +251,22 @@ results/
 The page is self-contained — the charts are inline SVG, so it still works when it is opened in two
 years on a machine with no network.
 
+The rendering half drives the camera through a fixed tour rather than asking somebody to stand in
+the right place: a city overview where the four shadow cascades dominate, the downtown skyline, a
+street at eye level where the simulation is the larger half, and a signalised junction. Each is
+warmed up for as many frames as it is then measured for, so a shader compile does not become the
+measurement. `passes.csv` comes from CNA's own timer queries rather than from a stopwatch around a
+draw call — and it shows things a stopwatch cannot, like SSAO appearing only in the two street-level
+views because ambient occlusion switches itself off above roof height:
+
+```
+view                   frame_ms  draw_ms  shadow_ms  prepass_ms  draw_calls  triangles
+city overview             17.87    15.17       6.06        0.00         487     178090
+street level              14.29    10.48       2.55        1.27         226      68326
+```
+
+`--headless --report` writes the simulation half only.
+
 Each scale is measured `--repeat` times and the **fastest** run is reported with the **spread**
 beside it. That is not cherry-picking: two runs of the same build do identical work, so the
 difference between them is whatever else the machine was doing, and the minimum is the closest

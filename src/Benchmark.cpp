@@ -3,6 +3,7 @@
 
 #include "Checksum.hpp"
 #include "Replay.hpp"
+#include "CityGame.hpp"
 #include "Report.hpp"
 #include "Snapshot.hpp"
 
@@ -416,6 +417,23 @@ namespace CnaCity
             sim.Initialize(config);
             report.system.cityDigest = ToHex(ComputeCityChecksum(sim));
             report.system.workerThreads = sim.threadCount();
+        }
+
+        // The rendering half, which needs a device and therefore a window. It runs after the
+        // simulation sweep rather than beside it: they compete for the same cores, and a frame
+        // time measured while a hundred thousand citizens are being simulated on every other
+        // thread is a measurement of the machine's scheduler.
+        if (options.renderReport)
+        {
+            std::printf("\nrendering:\n");
+            CliOptions gameOptions = options;
+            gameOptions.mode = RunMode::Interactive;
+            gameOptions.overlay = 0;
+            CityGame game(gameOptions);
+            game.Run();
+            report.rendering = game.renderingRows();
+            report.passes = game.passRows();
+            if (!report.rendering.empty()) report.system.graphicsCard = game.rendererName();
         }
 
         std::string error;

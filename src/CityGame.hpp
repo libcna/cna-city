@@ -11,6 +11,7 @@
 #include "InstanceRenderer.hpp"
 #include "Materials.hpp"
 #include "Replay.hpp"
+#include "Report.hpp"
 #include "Simulation.hpp"
 #include "SkyLighting.hpp"
 #include "TextRenderer.hpp"
@@ -155,6 +156,36 @@ namespace CnaCity
         /// closed recorder is already the do-nothing one.
         ReplayRecorder recorder_;
         bool savedSnapshot_ = false;
+
+        // --- The scripted render benchmark ------------------------------------------------------
+        //
+        // `--report` measures the renderer by driving the camera through a fixed set of viewpoints
+        // rather than by asking somebody to stand in the right place. The set is small and chosen
+        // for contrast: an overview where the shadow cascades dominate, a street where the
+        // simulation does, and a junction where neither does.
+        struct RenderProbe
+        {
+            const char* name;
+            CameraMode camera;
+            Microsoft::Xna::Framework::Vector3 position;
+            float yaw;
+            float pitch;
+        };
+        int reportProbe_ = -1;      ///< Index into the probe table; -1 until the first frame.
+        int reportFrame_ = 0;       ///< Frames spent on the current probe, warm-up included.
+        RenderingRow reportAccum_;  ///< Running totals for the probe being measured.
+        std::vector<RenderingRow> renderingRows_;
+        std::vector<PassRow> passRows_;
+        void StepRenderReport();
+
+    public:
+        /** @brief What the scripted render benchmark measured. Empty unless --report ran one. */
+        [[nodiscard]] const std::vector<RenderingRow>& renderingRows() const { return renderingRows_; }
+        [[nodiscard]] const std::vector<PassRow>& passRows() const { return passRows_; }
+        /** @brief What the device called itself, for the report's machine description. */
+        [[nodiscard]] const std::string& rendererName() const { return rendererName_; }
+
+    private:
         /// Writes the replay if one is being recorded. Idempotent; called from both exit paths.
         void FinishRecording();
 

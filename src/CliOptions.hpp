@@ -64,6 +64,15 @@ namespace CnaCity
         /// How many times --report measures each scale. The fastest is reported and the spread
         /// beside it; one run on a shared machine is a number nobody can argue with.
         int reportRepeats = 3;
+        /// Measure the renderer as well as the simulation. Set when --report runs with a device,
+        /// which is the only way to get frame and GPU pass timings at all.
+        bool renderReport = false;
+        /// Whether --headless was named, kept separately because --report also sets the mode and
+        /// the two can arrive in either order.
+        bool headlessRequested = false;
+        /// Frames measured per viewpoint, after a warm-up of the same length. Long enough that a
+        /// shader compile or a cold cache does not become the measurement.
+        int reportFrames = 240;
         std::string savePath;     ///< --save: write a snapshot when the run ends.
         std::string loadPath;     ///< --load: start from a snapshot instead of from hour zero.
         std::string snapshotNote; ///< --note: free text stored in the snapshot header.

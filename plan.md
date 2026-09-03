@@ -373,9 +373,13 @@ two machines meant comparing two scrollbacks.
   ran cannot be compared with anybody else's, and one that does not say the machine was busy
   invites a false conclusion.
 
-### Not yet
-
-- **`rendering.csv` and `passes.csv` are written but empty.** They need a graphics device, and
-  `--report` is headless. The columns and the page section exist so that filling them is a change
-  in one place; doing it means driving `CityGame` through a scripted set of viewpoints, which is
-  the next step and the precondition for comparing CNA's renderers against each other.
+- [x] **P14.4 The rendering half.** `--report` with a device drives the camera through a fixed
+  tour -- a city overview where the shadow cascades dominate, the downtown skyline, a street at eye
+  level where the simulation is the larger half, and a signalised junction -- warming each up for
+  as many frames as it then measures, so a shader compile does not become the measurement. It runs
+  *after* the simulation sweep rather than beside it, because the two compete for the same cores
+  and a frame time measured while a hundred thousand citizens are simulated on every other thread
+  is a measurement of the scheduler. `passes.csv` comes from CNA's own timer queries, and shows
+  what a CPU-side stopwatch cannot: SSAO appears only in the street-level views, because ambient
+  occlusion switches itself off above roof height. `--headless --report` writes the simulation half
+  alone.

@@ -190,6 +190,10 @@ namespace CnaCity
                 if (!next(value)) { options.error = "--report needs a directory"; return false; }
                 options.reportPath = value;
                 options.mode = RunMode::Report;
+                // The rendering half needs a device, so it is on unless --headless says otherwise.
+                // Ordering matters: --headless --report and --report --headless must agree, which
+                // is why the decision is deferred to the end of parsing.
+                options.renderReport = true;
             }
             else if (arg == "--save")
             {
@@ -262,7 +266,7 @@ namespace CnaCity
                 else { options.error = "--overlay: expected none, stats, roads or routes"; return false; }
             }
             else if (arg == "--bench") options.mode = RunMode::Benchmark;
-            else if (arg == "--headless") options.mode = RunMode::Headless;
+            else if (arg == "--headless") { options.mode = RunMode::Headless; options.headlessRequested = true; }
             else if (arg == "--csv") { if (!next(value)) { options.error = "--csv needs a path"; return false; } options.csvPath = value; }
             else if (arg == "--screenshot") { if (!next(value)) { options.error = "--screenshot needs a path"; return false; } options.screenshotPath = value; }
             else if (arg == "--frames") { std::uint32_t n = 0; if (!next(value) || !ParseUInt(value, n)) { options.error = "--frames needs a count"; return false; } options.frameLimit = static_cast<int>(n); }
@@ -291,6 +295,13 @@ namespace CnaCity
             }
         }
 
+        // --headless and --report can arrive in either order, so the decision is made once
+        // parsing is done rather than by whichever of them was last on the line.
+        if (!options.reportPath.empty())
+        {
+            options.mode = options.mode == RunMode::Headless ? RunMode::Report : RunMode::Report;
+            options.renderReport = options.renderReport && !options.headlessRequested;
+        }
         if (options.mode == RunMode::Benchmark && options.benchScales.empty())
             options.benchScales = {1000, 10000, 100000};
         // A start hour outside the day is a typo, not a request for yesterday.
