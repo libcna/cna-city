@@ -141,6 +141,7 @@ namespace CnaCity
         std::size_t drawnPeople_ = 0;
         std::size_t drawnVehicles_ = 0;
         std::size_t drawnProps_ = 0;
+        std::size_t drawnParked_ = 0;
         int frameCount_ = 0;
         std::string rendererName_;
         std::string diagnostic_;

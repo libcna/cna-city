@@ -167,6 +167,45 @@ namespace CnaCity
                 mesh.indices.insert(mesh.indices.end(), {base, base + i, base + i + 1});
         }
 
+        // ---- Pedestrian crossings --------------------------------------------------------------
+        //
+        // A ladder of bars across each approach to a signalised junction, set back from the
+        // stop line. Only signalised junctions get them, which is also true of this city's
+        // traffic model: an unsignalised give-way has no phase for a pedestrian to cross on.
+        for (std::uint32_t n = 0; n < roads.nodes().size(); ++n)
+        {
+            const RoadNode& node = roads.nodes()[n];
+            if (!node.signalised) continue;
+            for (std::uint16_t k = 0; k < node.incidentCount; ++k)
+            {
+                const Incidence& inc = roads.incident()[node.firstIncident + k];
+                const RoadSegment& segment = roads.segments()[inc.segment];
+                if (segment.length < 26.0f) continue;
+                const RoadProfile& profile = ProfileOf(segment.roadClass);
+                if (profile.sidewalkWidth < 1.0f) continue;
+
+                const Vec2 along = FromHeading(inc.heading);
+                const Vec2 across = Perp(along);
+                // Beyond the stop line, so a car waiting at a red is behind the crossing rather
+                // than parked on it.
+                const Vec2 centre = node.position + along * (profile.carriagewayHalfWidth + 2.6f);
+                const float halfWidth = profile.carriagewayHalfWidth * 0.97f;
+
+                MeshData& mesh = meshFor(centre, CityMaterial::RoadMarking);
+                constexpr int kBars = 7;
+                for (int bar = 0; bar < kBars; ++bar)
+                {
+                    const float t = (static_cast<float>(bar) + 0.5f) / kBars;
+                    const Vec2 barCentre = centre + across * ((t * 2.0f - 1.0f) * halfWidth);
+                    // A bar runs *along* the direction of travel and is repeated across it, which
+                    // is the way round a real zebra is painted and the opposite of what "stripes
+                    // across the road" suggests.
+                    mesh.AddRibbon(barCentre - along * 1.35f, barCentre + along * 1.35f,
+                                   halfWidth / kBars * 0.55f, kRoadY + 0.012f, 0.0f, 1.0f, 0.0f, 1.0f);
+                }
+            }
+        }
+
         // ---- Block interiors -----------------------------------------------------------------------
         //
         // Two rings per block. The outer one runs to the kerb and is the footway; the inner one is
@@ -272,13 +311,20 @@ namespace CnaCity
             // tell of a generated city.
             const Vec2 tile = materials.Get(facade).worldScale;
             const Vec2 uvScale(1.0f / std::max(0.5f, tile.X), 1.0f / std::max(0.5f, tile.Y));
+            // The variant shifts where in the facade tile this building starts. The tile is four
+            // bays and four storeys, and which of them have blinds down or a light on is baked
+            // into it -- so a quarter-tile offset gives every building in a terrace a different
+            // window pattern for nothing at all. Without it a street of thirty houses repeats the
+            // same four windows thirty times, which the eye picks up instantly.
+            const Vec2 uvOrigin(static_cast<float>(building.variant & 3u) * 0.25f,
+                                static_cast<float>((building.variant >> 2) & 1u) * 0.25f);
 
             // Podium first, where there is one, then the tower stepped back on top of it.
             float base = 0.0f;
             if (building.podiumHeight > 0.0f)
             {
                 walls.AddBox(building.center, 0.0f, building.podiumHalfExtent, building.podiumHeight,
-                             building.rotation, uvScale, Vec2(0.0f, 0.0f), false, Vec2(1, 1));
+                             building.rotation, uvScale, uvOrigin, false, Vec2(1, 1));
                 roof.AddQuad(
                     ToWorld(building.center + Rotate(Vec2(-building.podiumHalfExtent.X, -building.podiumHalfExtent.Y), building.rotation), building.podiumHeight),
                     ToWorld(building.center + Rotate(Vec2(building.podiumHalfExtent.X, -building.podiumHalfExtent.Y), building.rotation), building.podiumHeight),
@@ -292,30 +338,46 @@ namespace CnaCity
 
             walls.AddBox(building.center, base, building.halfExtent,
                          std::max(2.0f, building.height - base), building.rotation, uvScale,
-                         Vec2(0.0f, base * uvScale.Y), false, Vec2(1, 1));
-            // Wound clockwise as seen from above -- see the winding note in MeshBuilder.hpp. The
-            // other order leaves every flat roof in the city back-facing, and because a building's
-            // walls are culled from the inside, what you see from above instead is the pavement
-            // between the buildings. It reads as a roof, which is why this survived a dozen aerial
-            // screenshots.
-            roof.AddQuad(
-                ToWorld(building.center + Rotate(Vec2(-building.halfExtent.X, -building.halfExtent.Y), building.rotation), building.height),
-                ToWorld(building.center + Rotate(Vec2(building.halfExtent.X, -building.halfExtent.Y), building.rotation), building.height),
-                ToWorld(building.center + Rotate(Vec2(building.halfExtent.X, building.halfExtent.Y), building.rotation), building.height),
-                ToWorld(building.center + Rotate(Vec2(-building.halfExtent.X, building.halfExtent.Y), building.rotation), building.height),
-                Vector3(0.0f, 1.0f, 0.0f), Vec2(0.0f, 0.0f),
-                Vec2(building.halfExtent.X * 2.0f * roofScale,
-                     building.halfExtent.Y * 2.0f * roofScale));
-
-            // A parapet on anything flat-roofed and tall enough to have one. It is two hundred
-            // triangles per building that changes the whole silhouette of a skyline: without it
-            // every roofline is a hard edge against the sky and the city looks extruded.
-            if (building.height > 9.0f)
+                         Vec2(uvOrigin.X, uvOrigin.Y + base * uvScale.Y), false, Vec2(1, 1));
+            if (building.kind == BuildingKind::House)
             {
-                const Vec2 parapet(building.halfExtent.X + 0.25f, building.halfExtent.Y + 0.25f);
-                roof.AddBox(building.center, building.height, parapet, 0.9f, building.rotation,
-                            Vec2(roofScale, roofScale), Vec2(0.0f, 0.0f), true,
-                            Vec2(parapet.X * 2.0f * roofScale, parapet.Y * 2.0f * roofScale));
+                // A ridged roof, running along the building's long axis the way a terrace's does.
+                MeshData& tiles = meshFor(building.center, CityMaterial::RoofTile);
+                const bool longAxisX = building.halfExtent.X >= building.halfExtent.Y;
+                const Vec2 ridgeExtent = longAxisX
+                                             ? building.halfExtent
+                                             : Vec2(building.halfExtent.Y, building.halfExtent.X);
+                const float rotation = longAxisX ? building.rotation : building.rotation + kPi * 0.5f;
+                const float pitch = std::min(ridgeExtent.Y, 4.2f) * 0.85f;
+                tiles.AddPitchedRoof(building.center, building.height, ridgeExtent, rotation, pitch,
+                                     0.35f, Vec2(1.0f / 3.2f, 1.0f / 3.2f));
+            }
+            else
+            {
+                // Wound clockwise as seen from above -- see the winding note in MeshBuilder.hpp.
+                // The other order leaves every flat roof in the city back-facing, and because a
+                // building's walls are culled from the inside, what you see from above instead is
+                // the pavement between the buildings. It reads as a roof, which is why this
+                // survived a dozen aerial screenshots.
+                roof.AddQuad(
+                    ToWorld(building.center + Rotate(Vec2(-building.halfExtent.X, -building.halfExtent.Y), building.rotation), building.height),
+                    ToWorld(building.center + Rotate(Vec2(building.halfExtent.X, -building.halfExtent.Y), building.rotation), building.height),
+                    ToWorld(building.center + Rotate(Vec2(building.halfExtent.X, building.halfExtent.Y), building.rotation), building.height),
+                    ToWorld(building.center + Rotate(Vec2(-building.halfExtent.X, building.halfExtent.Y), building.rotation), building.height),
+                    Vector3(0.0f, 1.0f, 0.0f), Vec2(0.0f, 0.0f),
+                    Vec2(building.halfExtent.X * 2.0f * roofScale,
+                         building.halfExtent.Y * 2.0f * roofScale));
+
+                // A parapet on anything flat-roofed and tall enough to have one. It is two hundred
+                // triangles per building that changes the whole silhouette of a skyline: without
+                // it every roofline is a hard edge against the sky.
+                if (building.height > 9.0f)
+                {
+                    const Vec2 parapet(building.halfExtent.X + 0.25f, building.halfExtent.Y + 0.25f);
+                    roof.AddBox(building.center, building.height, parapet, 0.9f, building.rotation,
+                                Vec2(roofScale, roofScale), Vec2(0.0f, 0.0f), true,
+                                Vec2(parapet.X * 2.0f * roofScale, parapet.Y * 2.0f * roofScale));
+                }
             }
 
             // A roof mast on the tallest towers, which is what gives a downtown its skyline.
@@ -398,8 +460,9 @@ namespace CnaCity
                     if (chunk.meshes[m] != nullptr) perMaterial[m] += chunk.meshes[m]->triangleCount();
             static const char* const kNames[kCityMaterialCount] = {
                 "asphalt", "pavement", "grass", "glass tower", "concrete office", "brick apartment",
-                "render house", "metal shed", "roof", "foliage", "bark", "street furniture",
-                "vehicle body", "vehicle glass", "person", "metro tunnel"};
+                "render house", "metal shed", "flat roof", "roof tile", "road marking", "foliage",
+                "bark", "street furniture", "vehicle body", "vehicle glass", "person",
+                "metro tunnel"};
             for (int m = 0; m < kCityMaterialCount; ++m)
                 if (perMaterial[m] > 0)
                     std::printf("  geometry: %-18s %8d triangles\n", kNames[m], perMaterial[m]);

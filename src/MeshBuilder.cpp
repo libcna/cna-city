@@ -100,6 +100,53 @@ namespace CnaCity
                     Vec2(topUvScale.X, topUvScale.Y));
     }
 
+    void MeshData::AddPitchedRoof(Vec2 center, float baseY, Vec2 halfExtent, float rotation,
+                                  float ridgeHeight, float overhang, Vec2 uvScale)
+    {
+        const Vec2 axisU = FromHeading(rotation);
+        const Vec2 axisV = Perp(axisU);
+        const Vec2 u = axisU * (halfExtent.X + overhang);
+        const Vec2 v = axisV * (halfExtent.Y + overhang);
+        const Vec2 eaveA = center - u - v;      // (-x, -z)
+        const Vec2 eaveB = center + u - v;      // (+x, -z)
+        const Vec2 eaveC = center + u + v;      // (+x, +z)
+        const Vec2 eaveD = center - u + v;      // (-x, +z)
+        const Vec2 ridgeA = center - u;
+        const Vec2 ridgeB = center + u;
+        const float top = baseY + ridgeHeight;
+        const float uSpan = (halfExtent.X + overhang) * 2.0f * uvScale.X;
+        const float vSpan = std::sqrt(ridgeHeight * ridgeHeight +
+                                      (halfExtent.Y + overhang) * (halfExtent.Y + overhang)) *
+                            uvScale.Y;
+
+        // Both slopes, wound so the winding normal points into the roof -- see the note at the top
+        // of this file.
+        const Vec2 slopeNormalA = Normalized(axisV * -(ridgeHeight) + Vec2(0.0f, 0.0f));
+        (void)slopeNormalA;
+        const float run = halfExtent.Y + overhang;
+        const float inv = 1.0f / std::sqrt(run * run + ridgeHeight * ridgeHeight);
+        const Vector3 nearNormal(-axisV.X * ridgeHeight * inv, run * inv, -axisV.Y * ridgeHeight * inv);
+        const Vector3 farNormal(axisV.X * ridgeHeight * inv, run * inv, axisV.Y * ridgeHeight * inv);
+
+        AddQuad(ToWorld(eaveA, baseY), ToWorld(ridgeA, top), ToWorld(ridgeB, top),
+                ToWorld(eaveB, baseY), nearNormal, Vec2(0.0f, 0.0f), Vec2(uSpan, vSpan));
+        AddQuad(ToWorld(eaveC, baseY), ToWorld(ridgeB, top), ToWorld(ridgeA, top),
+                ToWorld(eaveD, baseY), farNormal, Vec2(0.0f, 0.0f), Vec2(uSpan, vSpan));
+
+        // The two gable triangles that close the ends.
+        const Vector3 gableNear(-axisU.X, 0.0f, -axisU.Y);
+        const Vector3 gableFar(axisU.X, 0.0f, axisU.Y);
+        const auto base = static_cast<std::uint32_t>(vertices.size());
+        const Vector4 tangentNear(axisV.X, 0.0f, axisV.Y, 1.0f);
+        vertices.emplace_back(ToWorld(eaveA, baseY), gableNear, tangentNear, Vector2(0.0f, vSpan));
+        vertices.emplace_back(ToWorld(eaveD, baseY), gableNear, tangentNear, Vector2(uSpan, vSpan));
+        vertices.emplace_back(ToWorld(ridgeA, top), gableNear, tangentNear, Vector2(uSpan * 0.5f, 0.0f));
+        vertices.emplace_back(ToWorld(eaveC, baseY), gableFar, tangentNear, Vector2(0.0f, vSpan));
+        vertices.emplace_back(ToWorld(eaveB, baseY), gableFar, tangentNear, Vector2(uSpan, vSpan));
+        vertices.emplace_back(ToWorld(ridgeB, top), gableFar, tangentNear, Vector2(uSpan * 0.5f, 0.0f));
+        indices.insert(indices.end(), {base, base + 1, base + 2, base + 3, base + 4, base + 5});
+    }
+
     void MeshData::AddRibbon(Vec2 from, Vec2 to, float halfWidth, float y, float uStart, float uEnd,
                              float vMin, float vMax)
     {

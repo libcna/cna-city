@@ -106,6 +106,28 @@ hardest to avoid" (`docs/cnaext-getting-started.md` §5) — applied to everythi
 per-frame list of passes that ran versus passes that copied through. `getStatistics()` is most of
 the way there already.
 
+### A8. Volumetric fog is enabled by a setting and configured by a method nothing can reach.
+
+`RenderPipeline` constructs a `VolumetricFogPass`, adds it to the chain whenever
+`settings.getVolumetricFogDensity() > 0`, and **never calls `setLight` on it** -- there is no
+`volumetricFogPass_->setLight` anywhere in `RenderPipeline.cpp`, and no accessor that would let a
+game do it either. `VolumetricFogPass::setLight(shadowMap, lightDirection, lightColour)` is public
+and unreachable.
+
+What that produces is not "no fog". The march runs 32 slices with no light direction and no shadow
+map, and above the rooflines -- where the depth image has nothing in it -- it integrates scattering
+against nothing and returns a band of red and green across the sky. It is only visible in weather
+that has fog in it, which is why it took an afternoon to find: the clear-weather screenshots were
+all clean.
+
+**Suggested:** either have `RenderPipeline` forward the light it is already given in
+`setShadowScene` to the pass, or expose `getVolumetricFogPassEXT()`. As it stands the setting is a
+switch that turns on an artefact.
+
+*Diagnosed by elimination: the band survives with light shafts off, survives with height fog on,
+and disappears the moment the volumetric density goes to zero. At `--quality low`, which enables
+none of the chain, it was never there.*
+
 ### A6. sharp-runtime's `Parallel::For` creates one operating-system thread per iteration.
 
 `System::Threading::Tasks::Parallel::For` calls `std::async(std::launch::async, …)` per index and

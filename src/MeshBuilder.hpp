@@ -81,6 +81,16 @@ namespace CnaCity
                     Vec2 uvScaleSides, Vec2 uvOriginSides, bool includeTop, Vec2 topUvScale,
                     bool includeBottom = false);
 
+        /**
+         * @brief A ridged roof over a rotated rectangle: two slopes and two gables.
+         *
+         * The ridge runs along the local X axis. Every building in this city is a box, and for
+         * almost all of them that is right -- an office block *is* a box. A house is not, and a
+         * suburb of flat-topped boxes is the one silhouette a suburb never has.
+         */
+        void AddPitchedRoof(Vec2 center, float baseY, Vec2 halfExtent, float rotation,
+                            float ridgeHeight, float overhang, Vec2 uvScale);
+
         /** @brief A flat horizontal ribbon along a polyline segment: roads, pavements, markings. */
         void AddRibbon(Vec2 from, Vec2 to, float halfWidth, float y, float uStart, float uEnd,
                        float vMin, float vMax);

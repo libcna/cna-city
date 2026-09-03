@@ -40,7 +40,8 @@ namespace CnaCity
         std::vector<Microsoft::Xna::Framework::Matrix> instances;
         CityMaterial material = CityMaterial::StreetFurniture;
         Microsoft::Xna::Framework::Vector3 tint{1.0f, 1.0f, 1.0f};
-        bool emissiveAtNight = false;   ///< Lamp heads and headlights.
+        bool emissiveAtNight = false;   ///< Lamp heads, signal lenses and headlights.
+        float emissiveFloor = 0.0f;     ///< Emissive even in daylight; a signal lens is always lit.
     };
 
     /**
@@ -70,6 +71,12 @@ namespace CnaCity
         void AddPerson(PersonLod lod, std::uint8_t phase, std::uint8_t colorBucket,
                        const Microsoft::Xna::Framework::Matrix& world);
         void AddTrain(const Microsoft::Xna::Framework::Matrix& world);
+        /**
+         * @brief Adds a traffic signal's lens, lit in the colour its approach is showing.
+         *
+         * @param colour 0 red, 1 amber, 2 green -- the values `Traffic::SignalColour` returns.
+         */
+        void AddSignalLens(std::uint8_t colour, const Microsoft::Xna::Framework::Matrix& world);
         /** @param snow False for a rain streak, true for a snowflake. */
         void AddPrecipitation(bool snow, const Microsoft::Xna::Framework::Matrix& world);
 
@@ -83,7 +90,7 @@ namespace CnaCity
                   Microsoft::Xna::Framework::Graphics::PbrEffect& effect,
                   const MaterialLibrary& materials, const Microsoft::Xna::Framework::Matrix& view,
                   const Microsoft::Xna::Framework::Matrix& projection, float nightLevel,
-                  float wetness);
+                  float wetness, float snow);
 
         [[nodiscard]] std::size_t instanceCount() const;
         [[nodiscard]] bool instancingSupported() const { return instancingSupported_; }
@@ -105,6 +112,7 @@ namespace CnaCity
         std::size_t vehicleGlass_[kVehicleKindCount] = {};
         std::size_t personBatch_[3][kWalkPhases][kColorBuckets] = {};
         std::size_t trainBatch_ = 0;
+        std::size_t signalLens_[3] = {};
         std::size_t rainBatch_ = 0;
         std::size_t snowBatch_ = 0;
         bool instancingSupported_ = false;

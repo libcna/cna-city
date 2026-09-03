@@ -78,6 +78,17 @@ namespace CnaCity
             return mesh;
         }
 
+        /// The lens: a small box on the front of the signal housing, proud of it by a centimetre.
+        /// It is drawn emissive, because a traffic light is legible at night precisely because it
+        /// emits rather than reflects.
+        MeshData BuildSignalLens()
+        {
+            MeshData mesh;
+            mesh.AddBox(Vec2(0.0f, -0.135f), 2.62f, Vec2(0.105f, 0.02f), 0.19f, 0.0f, Vec2(1, 1),
+                        Vec2(0, 0), true, Vec2(1, 1), true);
+            return mesh;
+        }
+
         MeshData BuildTreeTrunk()
         {
             MeshData mesh;
@@ -324,6 +335,7 @@ namespace CnaCity
         batch.material = material;
         batch.tint = tint;
         batch.emissiveAtNight = emissive;
+        batch.emissiveFloor = 0.0f;
         instancingSupported_ = batch.renderer->isInstancingSupported();
         batches_.push_back(std::move(batch));
         return batches_.size() - 1;
@@ -387,6 +399,19 @@ namespace CnaCity
                         CityMaterial::Person, kClothing[bucket], false);
                 }
 
+        // One batch per aspect rather than a per-instance colour, for the same reason the crowd is
+        // bucketed: there is no attribute slot left for a tint. Three batches is a cheap price for
+        // the most legible piece of machinery a city has.
+        signalLens_[0] = AddBatch(device, BuildSignalLens(), CityMaterial::StreetFurniture,
+                                  Vector3(1.0f, 0.10f, 0.08f), true);
+        signalLens_[1] = AddBatch(device, BuildSignalLens(), CityMaterial::StreetFurniture,
+                                  Vector3(1.0f, 0.62f, 0.06f), true);
+        signalLens_[2] = AddBatch(device, BuildSignalLens(), CityMaterial::StreetFurniture,
+                                  Vector3(0.15f, 1.0f, 0.30f), true);
+
+        for (std::size_t index : signalLens_)
+            if (index < batches_.size()) batches_[index].emissiveFloor = 1.35f;
+
         trainBatch_ = AddBatch(device, BuildTrainCar(), CityMaterial::StreetFurniture,
                                Vector3(0.72f, 0.74f, 0.78f), false);
         // Precipitation is emissive so it stays visible against a dark wet street at night, which
@@ -433,6 +458,12 @@ namespace CnaCity
         if (trainBatch_ < batches_.size()) batches_[trainBatch_].instances.push_back(world);
     }
 
+    void InstanceRenderer::AddSignalLens(std::uint8_t colour, const Matrix& world)
+    {
+        const std::size_t index = signalLens_[colour % 3];
+        if (index < batches_.size()) batches_[index].instances.push_back(world);
+    }
+
     void InstanceRenderer::AddPrecipitation(bool snow, const Matrix& world)
     {
         const std::size_t index = snow ? snowBatch_ : rainBatch_;
@@ -453,7 +484,8 @@ namespace CnaCity
 
     int InstanceRenderer::Flush(GraphicsDevice& device, PbrEffect& effect,
                                 const MaterialLibrary& materials, const Matrix& view,
-                                const Matrix& projection, float nightLevel, float wetness)
+                                const Matrix& projection, float nightLevel, float wetness,
+                                float snow)
     {
         if (!instancingSupported_) return 0;
         int draws = 0;
@@ -464,14 +496,17 @@ namespace CnaCity
         for (InstanceBatch& batch : batches_)
         {
             if (batch.instances.empty() || batch.renderer == nullptr) continue;
-            materials.Apply(effect, batch.material, nightLevel, wetness);
+            materials.Apply(effect, batch.material, nightLevel, wetness, snow);
             effect.setDiffuseColorProperty(batch.tint);
             if (batch.emissiveAtNight)
             {
                 // A lamp head is a light source in its own right, and the emissive term is what
-                // makes it visible as one rather than as a dark box under a pool of light.
-                const float glow = Saturate(nightLevel) * 1.7f;
-                effect.setEmissiveFactorProperty(Vector3(glow, glow * 0.86f, glow * 0.62f));
+                // makes it visible as one rather than as a dark box under a pool of light. A
+                // signal lens keeps a floor under it in daylight, because a traffic light that
+                // only glows after dark is not a traffic light.
+                const float glow = std::max(batch.emissiveFloor, Saturate(nightLevel) * 1.7f);
+                effect.setEmissiveFactorProperty(
+                    Vector3(glow * batch.tint.X, glow * batch.tint.Y, glow * batch.tint.Z));
             }
             device.setRasterizerStateProperty(materials.Get(batch.material).doubleSided
                                                   ? RasterizerState::CullNone

@@ -107,6 +107,28 @@ namespace CnaCity
         float scale = 1.0f;
         PropKind kind = PropKind::StreetLamp;
         std::uint16_t district = 0;
+        /// For a traffic signal: the junction it governs and the approach it faces, as an absolute
+        /// index into RoadNetwork::incident(). A signal has to be able to ask the traffic model what
+        /// colour it is showing, and the phase is a property of the approach rather than of the
+        /// post -- a five-way junction has five heads and two of them disagree at any moment.
+        std::uint32_t node = 0xFFFFFFFFu;
+        std::uint32_t incidence = 0xFFFFFFFFu;
+    };
+
+    /**
+     * @brief A vehicle standing at the kerb. Generated with the city and never simulated.
+     *
+     * Kerbside parking is most of what makes a street look inhabited, and its absence is why an
+     * empty residential road reads as a bypass. These are not part of the traffic model at all --
+     * they never move, never plan, and cost the simulation nothing; they are city furniture that
+     * happens to be car-shaped.
+     */
+    struct ParkedVehicle
+    {
+        Vec2 position{0.0f, 0.0f};
+        float rotation = 0.0f;
+        std::uint8_t kind = 0;        ///< A VehicleKind.
+        std::uint8_t appearance = 0;  ///< Colour bucket.
     };
 
     /** @brief Everything the generator needs to be told; everything else follows from the seed. */
@@ -119,6 +141,7 @@ namespace CnaCity
         float blockSetback = 1.2f;       ///< Extra inset past the pavement before anything is built.
         int   metroLines = 4;
         float parkFraction = 0.10f;      ///< Share of districts turned over to parkland.
+        float kerbOccupancy = 0.42f;     ///< Share of usable kerb length with a car standing on it.
     };
 
     /**
@@ -138,6 +161,7 @@ namespace CnaCity
         [[nodiscard]] const std::vector<District>& districts() const { return districts_; }
         [[nodiscard]] const std::vector<Building>& buildings() const { return buildings_; }
         [[nodiscard]] const std::vector<Prop>& props() const { return props_; }
+        [[nodiscard]] const std::vector<ParkedVehicle>& parkedVehicles() const { return parked_; }
         [[nodiscard]] const std::vector<std::uint32_t>& homes() const { return homes_; }
         [[nodiscard]] const std::vector<std::uint32_t>& workplaces() const { return workplaces_; }
         [[nodiscard]] const std::vector<std::uint32_t>& leisureVenues() const { return leisure_; }
@@ -165,6 +189,7 @@ namespace CnaCity
         void GenerateRoads(Rng& rng);
         void GenerateBuildings(Rng& rng);
         void GenerateProps(Rng& rng);
+        void GenerateParking(Rng& rng);
         void BuildOccupancy();
         [[nodiscard]] int CellIndex(float world) const;
         void AssignDistrictsToNetwork();
@@ -186,6 +211,7 @@ namespace CnaCity
         std::vector<District> districts_;
         std::vector<Building> buildings_;
         std::vector<Prop> props_;
+        std::vector<ParkedVehicle> parked_;
         /// Index lists over @ref buildings_, so the population generator can draw a home or a job
         /// without rejection-sampling the whole city.
         std::vector<std::uint32_t> homes_;

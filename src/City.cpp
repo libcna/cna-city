@@ -134,6 +134,7 @@ namespace CnaCity
 
         Rng propRng = root.Split(StreamProps);
         GenerateProps(propRng);
+        GenerateParking(propRng);
 
         BuildOccupancy();
     }
@@ -683,6 +684,64 @@ namespace CnaCity
         }
     }
 
+    void City::GenerateParking(Rng& rng)
+    {
+        parked_.clear();
+        const std::vector<RoadNode>& nodes = roads_.nodes();
+        // 5.6 m of kerb per car: a five-metre car and the gap a driver actually leaves.
+        constexpr float kBay = 5.6f;
+
+        for (const RoadSegment& segment : roads_.segments())
+        {
+            // Only where a car may legally stand: no parking on the ring highway, none in an
+            // alley, and none on an arterial, where the kerb lane is a running lane.
+            if (segment.roadClass != RoadClass::Local && segment.roadClass != RoadClass::Collector)
+                continue;
+            const ZoneType zone = districts_[segment.district].zone;
+            if (zone == ZoneType::Park) continue;
+
+            const RoadProfile& profile = ProfileOf(segment.roadClass);
+            const Vec2 a = nodes[segment.nodeA].position;
+            const Vec2 side = Perp(segment.direction);
+            // Clear of the junction at either end: the last few metres of a road are a bay nobody
+            // is allowed to use, and a car parked across a crossing looks like a bug.
+            const float usable = segment.length - 2.0f * (profile.carriagewayHalfWidth + 3.0f);
+            if (usable < kBay) continue;
+            const int bays = static_cast<int>(usable / kBay);
+
+            // Industry and downtown have loading bays and car parks rather than residents' cars,
+            // so their kerbs are emptier; a suburb's are fuller.
+            const float occupancy = config_.kerbOccupancy *
+                                    (zone == ZoneType::Suburb      ? 1.15f
+                                     : zone == ZoneType::Residential ? 1.05f
+                                     : zone == ZoneType::Industrial  ? 0.45f
+                                     : zone == ZoneType::Downtown    ? 0.55f
+                                                                     : 0.85f);
+
+            for (int s = -1; s <= 1; s += 2)
+                for (int bay = 0; bay < bays; ++bay)
+                {
+                    if (!rng.Chance(Saturate(occupancy))) continue;
+                    const float along = profile.carriagewayHalfWidth + 3.0f +
+                                        (static_cast<float>(bay) + 0.5f) * kBay;
+                    ParkedVehicle car;
+                    // Half a metre off the kerb line, which is where a parked car sits: outside the
+                    // running lane and not on the pavement.
+                    car.position = a + segment.direction * along +
+                                   side * ((profile.carriagewayHalfWidth - 1.05f) *
+                                           static_cast<float>(s));
+                    // Facing the direction of travel on that side of the road, with the small
+                    // misalignment every real parked car has.
+                    car.rotation = Heading(segment.direction * static_cast<float>(-s)) +
+                                   rng.NextFloat(-0.035f, 0.035f);
+                    const std::uint32_t roll = rng.NextUInt(100);
+                    car.kind = static_cast<std::uint8_t>(roll < 52 ? 0 : roll < 84 ? 1 : roll < 95 ? 2 : 5);
+                    car.appearance = static_cast<std::uint8_t>(rng.NextUInt(8));
+                    parked_.push_back(car);
+                }
+        }
+    }
+
     void City::BuildOccupancy()
     {
         const float span = config_.halfSize * 2.0f + 120.0f;
@@ -830,6 +889,8 @@ namespace CnaCity
                 signal.rotation = inc.heading + kPi;
                 signal.kind = PropKind::TrafficSignal;
                 signal.district = node.district;
+                signal.node = n;
+                signal.incidence = node.firstIncident + k;
                 props_.push_back(signal);
             }
         }

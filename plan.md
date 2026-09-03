@@ -65,20 +65,20 @@ the lamps *are* real lights, `CNA-FINDINGS.md` says they cannot be. The findings
 
 ## P4 — Things a city has that this one does not
 
-- [ ] **P4.1 Traffic lights that change colour.** The phase is simulated and `SignalColour` exists,
+- [x] **P4.1 Traffic lights that change colour.** The phase is simulated and `SignalColour` exists,
   but the signal heads are drawn in one static colour, so the most legible piece of city machinery
   is invisible. *Accept:* a signal head is red, amber or green according to its own approach, and
   the change is visible from the street camera.
-- [ ] **P4.2 Parked cars.** Kerbside parking is most of what makes a street look inhabited, and its
+- [x] **P4.2 Parked cars.** Kerbside parking is most of what makes a street look inhabited, and its
   absence is why every road here reads as a bypass. *Accept:* parked vehicles line the kerb on
   local and collector streets, generated with the city and not simulated.
-- [ ] **P4.3 Pedestrian crossings.** Zebra markings on the approaches to signalised junctions.
+- [x] **P4.3 Pedestrian crossings.** Zebra markings on the approaches to signalised junctions.
   *Accept:* visible from the street camera, and aligned with the carriageway.
-- [ ] **P4.4 Pitched roofs on houses.** Every building in the suburbs is a flat-topped box, which is
+- [x] **P4.4 Pitched roofs on houses.** Every building in the suburbs is a flat-topped box, which is
   the one silhouette a suburb never has. *Accept:* `BuildingKind::House` gets a ridged roof.
-- [ ] **P4.5 Facade variety.** `Building::variant` is assigned and never read. *Accept:* it selects
+- [x] **P4.5 Facade variety.** `Building::variant` is assigned and never read. *Accept:* it selects
   between facade tints so a terrace is not one colour repeated.
-- [ ] **P4.6 Snow that settles.** `Weather::snowCover` is simulated and nothing shows it.
+- [x] **P4.6 Snow that settles.** `Weather::snowCover` is simulated and nothing shows it.
   *Accept:* ground materials whiten with the cover.
 
 ## P5 — The follow camera should be able to follow a whole day
@@ -97,6 +97,12 @@ the lamps *are* real lights, `CNA-FINDINGS.md` says they cannot be. The findings
 
 - [x] **P7.1** `MeshData::AddPrism`, `Pathfinder::ResetStats`, `Pathfinder::cacheEntryCount` and
   `CityGeometry::bounds` are unreferenced. *Accept:* removed, or wired to something.
+
+## P9 — Found while implementing P4
+
+- [x] **P9.1 Volumetric fog draws a coloured band across the sky.** `RenderPipeline` adds the pass
+  and never gives it a light, and exposes no way for a game to. Turned off, with the diagnosis in
+  [`CNA-FINDINGS.md`](CNA-FINDINGS.md) A8.
 
 ## P8 — Honesty about arrivals
 

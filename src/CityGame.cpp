@@ -526,26 +526,45 @@ namespace CnaCity
                 // it in the middle of a crossroads looking down at the tarmac from five metres up,
                 // which is the one place on a street where you can see least.
                 static Vec2 spot(0.0f, 0.0f);
+                static Vec2 watching(0.0f, 0.0f);
                 if (LengthSq(spot) < 1e-6f && !sim_.city().roads().nodes().empty())
                 {
                     const auto& nodes = sim_.city().roads().nodes();
-                    const RoadNode& node = nodes[(nodes.size() * 7u / 13u) % nodes.size()];
+                    // A signalised junction, because it is the most interesting thing on a street
+                    // to stand and watch: the queue builds, the phase turns, the queue discharges.
+                    // Only about one junction in twelve here has lights, so a uniformly chosen
+                    // node almost never does.
+                    std::uint32_t chosen = static_cast<std::uint32_t>((nodes.size() * 7u / 13u) %
+                                                                      nodes.size());
+                    for (std::uint32_t offset = 0; offset < nodes.size(); ++offset)
+                    {
+                        const std::uint32_t candidate =
+                            static_cast<std::uint32_t>((chosen + offset) % nodes.size());
+                        if (nodes[candidate].signalised) { chosen = candidate; break; }
+                    }
+                    const RoadNode& node = nodes[chosen];
                     spot = node.position;
+                    watching = node.position;
                     if (node.incidentCount > 0)
                     {
-                        const Incidence& arm = sim_.city().roads().incidenceBegin(
-                            static_cast<std::uint32_t>(&node - nodes.data()))[0];
+                        const Incidence& arm = sim_.city().roads().incidenceBegin(chosen)[0];
                         const Vec2 along = FromHeading(arm.heading);
                         const RoadProfile& profile = ProfileOf(node.highestClass);
                         // Well back from the kerb: at a metre and a half the nearest parked car
                         // fills a third of the frame and the street behind it is invisible.
-                        spot = spot + along * 26.0f +
-                               Perp(along) * (profile.carriagewayHalfWidth + 4.2f);
+                        // Back along one arm and out past the kerb, far enough that the junction
+                        // and its lights are both in frame.
+                        spot = spot + along * 22.0f +
+                               Perp(along) * (profile.carriagewayHalfWidth + 4.0f);
                     }
                 }
                 camera_.position = ToWorld(spot, 2.35f);
-                camera_.yaw += dt * 0.055f;
-                camera_.pitch = -0.045f;
+                // Aimed at the junction and held there, with a slow drift either side of it. The
+                // first version panned continuously, which meant the one thing the mode exists to
+                // show -- a signal turning and a queue discharging -- was in frame about a third of
+                // the time and never when a screenshot was taken.
+                camera_.LookAt(ToWorld(watching, 1.6f));
+                camera_.yaw += std::sin(static_cast<float>(frameCount_) * 0.0016f) * 0.10f;
                 break;
             }
 
@@ -724,7 +743,16 @@ namespace CnaCity
             settings.setHeightFogDensity(sim_.weather().fogDensity() * 0.028f);
             settings.setHeightFogFalloff(0.035f);
             settings.setHeightFogBaseHeight(2.0f);
-            settings.setVolumetricFogDensity(sim_.weather().fogDensity() * 0.30f);
+            // Volumetric fog stays off, and not by preference.
+            //
+            // `RenderPipeline` builds a `VolumetricFogPass`, adds it to the chain whenever this
+            // density is above zero, and never calls `setLight` on it -- nor does it expose the
+            // pass, so a game cannot either. The march therefore runs with no light direction and
+            // no shadow map, and what it produces is not "no fog" but a band of red and green
+            // across the sky above the rooflines, which is its slice quantisation of a scattering
+            // integral against nothing. It cost an afternoon to find because it only appears in
+            // weather with fog in it. See CNA-FINDINGS.md A8.
+            settings.setVolumetricFogDensity(0.0f);
             // God rays need a god. After sunset there is no bright source behind the rooflines for
             // the radial blur to smear, and what it produces instead is a band of red and green
             // fringing along every silhouette against the sky -- which is what the first night
@@ -791,7 +819,7 @@ namespace CnaCity
 
         // ---- Instances ---------------------------------------------------------------------
         instances_.BeginFrame();
-        drawnPeople_ = drawnVehicles_ = drawnProps_ = 0;
+        drawnPeople_ = drawnVehicles_ = drawnProps_ = drawnParked_ = 0;
 
         const Vector3 eye = camera_.position;
         const auto distanceSq = [&](Vec2 p) {
@@ -809,11 +837,17 @@ namespace CnaCity
             const BoundingBox bounds(Vector3(prop.position.X - 3.0f, -0.5f, prop.position.Y - 3.0f),
                                       Vector3(prop.position.X + 3.0f, 9.0f, prop.position.Y + 3.0f));
             if (!culler_.isVisible(bounds)) continue;
-            instances_.AddProp(prop.kind,
-                               Matrix::CreateScale(prop.scale) *
-                                   Matrix::CreateRotationY(-prop.rotation) *
-                                   Matrix::CreateTranslation(prop.position.X, 0.0f, prop.position.Y));
+            const Matrix world = Matrix::CreateScale(prop.scale) *
+                                 Matrix::CreateRotationY(-prop.rotation) *
+                                 Matrix::CreateTranslation(prop.position.X, 0.0f, prop.position.Y);
+            instances_.AddProp(prop.kind, world);
             ++drawnProps_;
+            // A signal head asks the traffic model what its own approach is showing. The phase is
+            // per approach, not per junction: a five-way crossing has five heads and two of them
+            // disagree at any moment, which is the thing that makes a junction legible.
+            if (prop.kind == PropKind::TrafficSignal && prop.node != kNoIndex)
+                instances_.AddSignalLens(sim_.traffic().SignalColour(prop.node, prop.incidence),
+                                         world);
         }
         for (const MetroStation& station : sim_.metro().stations())
         {
@@ -821,6 +855,20 @@ namespace CnaCity
             instances_.AddProp(PropKind::MetroEntrance,
                                Matrix::CreateTranslation(station.entrance.X, 0.15f, station.entrance.Y));
             ++drawnProps_;
+        }
+
+        // Parked cars. They are city furniture rather than traffic -- generated with the streets
+        // and never simulated -- so they go through the same instanced batches as the moving ones
+        // and cost the tick nothing at all.
+        for (const ParkedVehicle& parked : sim_.city().parkedVehicles())
+        {
+            if (vehicleLod_.selectIndex(std::sqrt(distanceSq(parked.position))) < 0) continue;
+            const BoundingBox bounds(Vector3(parked.position.X - 4.0f, -0.5f, parked.position.Y - 4.0f),
+                                      Vector3(parked.position.X + 4.0f, 3.0f, parked.position.Y + 4.0f));
+            if (!culler_.isVisible(bounds)) continue;
+            instances_.AddVehicle(static_cast<VehicleKind>(parked.kind), parked.appearance,
+                                  VehicleTransform(parked.position, parked.rotation));
+            ++drawnParked_;
         }
 
         // Vehicles.
@@ -1004,6 +1052,7 @@ namespace CnaCity
         const Matrix projection = camera_.Projection();
         const float night = sim_.clock().StreetLightLevel();
         const float wetness = sim_.weather().wetness();
+        const float snow = sim_.weather().snowCover();
 
         effect_->setWorldProperty(Matrix::getIdentityProperty());
         effect_->setViewProperty(view);
@@ -1041,7 +1090,7 @@ namespace CnaCity
                     // and therefore re-bind four textures and re-upload the uniform block -- once
                     // per chunk instead of once per material, which at forty visible chunks is
                     // forty times the state changes for the same pixels.
-                    materials_.Apply(*effect_, static_cast<CityMaterial>(m), night, wetness);
+                    materials_.Apply(*effect_, static_cast<CityMaterial>(m), night, wetness, snow);
                     device.setRasterizerStateProperty(material.doubleSided
                                                           ? RasterizerState::CullNone
                                                           : RasterizerState::CullCounterClockwise);
@@ -1262,7 +1311,8 @@ namespace CnaCity
         sceneMs_ = ElapsedMs(watch);
 
         watch.Restart();
-        drawCalls_ += instances_.Flush(device, *effect_, materials_, view, projection, night, wetness);
+        drawCalls_ += instances_.Flush(device, *effect_, materials_, view, projection, night, wetness,
+                                       sim_.weather().snowCover());
         watch.Stop();
         instanceMs_ = ElapsedMs(watch);
 
@@ -1369,7 +1419,8 @@ namespace CnaCity
             stats.tripsDeferred, stats.routeFailures);
         add("DRAWS %d  TRIS %dK  CHUNKS %zu/%zu", drawCalls_, visibleTriangles_ / 1000,
             visibleChunks_.size(), geometry_.chunks().size());
-        add("DRAWN  PEOPLE %zu  VEHICLES %zu  PROPS %zu", drawnPeople_, drawnVehicles_, drawnProps_);
+        add("DRAWN  PEOPLE %zu  MOVING %zu  PARKED %zu  PROPS %zu", drawnPeople_, drawnVehicles_,
+            drawnParked_, drawnProps_);
         add("");
         add("CAMERA %s   TIME x%.0f%s", CameraModeName(cameraMode_),
             static_cast<double>(sim_.clock().timeScale()), paused_ ? "  PAUSED" : "");

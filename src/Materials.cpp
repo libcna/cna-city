@@ -397,6 +397,7 @@ namespace CnaCity
             asphalt.metallicRoughness = Adopt(UploadWithMips(device, roadMr, false));
             asphalt.roughness = 0.72f;
             asphalt.worldScale = Vec2(9.0f, 1.0f);
+            asphalt.horizontal = true;
         }
 
         // ---- Pavement -------------------------------------------------------------------------
@@ -426,6 +427,7 @@ namespace CnaCity
             pavement.metallicRoughness = Adopt(UploadWithMips(device, MakeMetallicRoughness(kTile, 0.80f, 0.0f, rng, 0.08f), false));
             pavement.roughness = 0.80f;
             pavement.worldScale = Vec2(2.4f, 2.4f);
+            pavement.horizontal = true;
         }
 
         // ---- Grass and parkland ----------------------------------------------------------------
@@ -441,6 +443,7 @@ namespace CnaCity
             green.metallicRoughness = Adopt(UploadWithMips(device, MakeMetallicRoughness(kTile, 0.92f, 0.0f, rng, 0.06f), false));
             green.roughness = 0.92f;
             green.worldScale = Vec2(5.0f, 5.0f);
+            green.horizontal = true;
         }
 
         // ---- The facades ------------------------------------------------------------------------
@@ -540,6 +543,52 @@ namespace CnaCity
             material.metallicRoughness = Adopt(UploadWithMips(device, MakeMetallicRoughness(kTile, 0.86f, 0.06f, rng, 0.10f), false));
             material.roughness = 0.86f;
             material.worldScale = Vec2(18.0f, 18.0f);
+            material.horizontal = true;
+        }
+
+        // ---- Pantiles, and the paint on the road ------------------------------------------------
+        {
+            Bitmap tiles(kTile, kTile, Color(146, 78, 54, 255));
+            // Courses of pantiles: a ridged profile in the normal map is what makes a pitched roof
+            // read as tiled rather than as a coloured plane, at any distance a house is visible.
+            for (int y = 0; y < kTile; ++y)
+                for (int x = 0; x < kTile; ++x)
+                {
+                    const int course = y / 16;
+                    const int offset = (course & 1) ? 12 : 0;
+                    const bool gap = (y % 16) < 2;
+                    const bool seam = ((x + offset) % 24) < 2;
+                    Color c = Mix(Color(128, 64, 44, 255), Color(178, 100, 68, 255),
+                                  rng.NextFloat(0.0f, 1.0f));
+                    if (gap || seam) c = Shade(c, 0.62f);
+                    tiles.At(x, y) = c;
+                }
+            Bitmap tileNormal(kTile, kTile, kFlatNormal);
+            for (int y = 0; y < kTile; ++y)
+                for (int x = 0; x < kTile; ++x)
+                {
+                    const float phase = static_cast<float>((x % 24)) / 24.0f;
+                    tileNormal.At(x, y) = EncodeNormal(std::cos(phase * 6.2831853f) * 0.55f,
+                                                       (y % 16) < 2 ? -0.5f : 0.0f, 0.85f);
+                }
+            Material& tile = materials_[static_cast<int>(CityMaterial::RoofTile)];
+            tile.albedo = Adopt(UploadWithMips(device, tiles, true));
+            tile.normal = Adopt(UploadWithMips(device, tileNormal, false));
+            tile.metallicRoughness = Adopt(UploadWithMips(device, MakeMetallicRoughness(kTile, 0.78f, 0.0f, rng, 0.08f), false));
+            tile.roughness = 0.78f;
+            tile.worldScale = Vec2(3.2f, 3.2f);
+            tile.horizontal = true;
+
+            // Thermoplastic road paint: bright, slightly rough, and a little dirty at the edges of
+            // the bar, because a crossing that is pure white reads as a decal.
+            Bitmap paint(64, 64, Color(226, 226, 218, 255));
+            AddNoise(paint, rng, 0.05f, 0.07f);
+            Material& marking = materials_[static_cast<int>(CityMaterial::RoadMarking)];
+            marking.albedo = Adopt(UploadWithMips(device, paint, true));
+            marking.metallicRoughness = Adopt(UploadWithMips(device, MakeMetallicRoughness(64, 0.55f, 0.0f, rng, 0.06f), false));
+            marking.roughness = 0.55f;
+            marking.worldScale = Vec2(1.0f, 1.0f);
+            marking.horizontal = true;
         }
 
         // ---- Vegetation --------------------------------------------------------------------------
@@ -598,7 +647,7 @@ namespace CnaCity
     }
 
     void MaterialLibrary::Apply(PbrEffect& effect, CityMaterial which, float nightLevel,
-                                float wetness) const
+                                float wetness, float snow) const
     {
         const Material& material = materials_[static_cast<int>(which)];
         effect.setTextureProperty(material.albedo);
@@ -610,10 +659,21 @@ namespace CnaCity
         // roughness. Both halves matter: darkening alone gives wet-looking mud, and smoothing
         // alone gives polished stone.
         const float wet = Saturate(wetness);
+        // Lying snow settles on horizontal surfaces and not on walls, which is why it is a material
+        // property rather than a global. It also cancels wetness: a surface cannot be both under
+        // standing water and under snow.
+        const float lying = material.horizontal ? Saturate(snow) : 0.0f;
         const Vector3 tint = material.baseColor;
-        const float darken = 1.0f - 0.42f * wet;
-        effect.setDiffuseColorProperty(Vector3(tint.X * darken, tint.Y * darken, tint.Z * darken));
-        effect.setRoughnessFactorProperty(Clamp(material.roughness * (1.0f - 0.72f * wet), 0.035f, 1.0f));
+        const float darken = 1.0f - 0.42f * wet * (1.0f - lying);
+        const Vector3 wetted(tint.X * darken, tint.Y * darken, tint.Z * darken);
+        const Vector3 snowColor(0.92f, 0.94f, 0.98f);
+        effect.setDiffuseColorProperty(
+            Vector3(wetted.X + (snowColor.X - wetted.X) * lying,
+                    wetted.Y + (snowColor.Y - wetted.Y) * lying,
+                    wetted.Z + (snowColor.Z - wetted.Z) * lying));
+        const float wetRoughness = material.roughness * (1.0f - 0.72f * wet);
+        effect.setRoughnessFactorProperty(
+            Clamp(wetRoughness + (0.94f - wetRoughness) * lying, 0.035f, 1.0f));
         effect.setMetallicFactorProperty(material.metallic);
 
         const float emissive = material.nightEmissive * Saturate(nightLevel);

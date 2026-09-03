@@ -32,6 +32,8 @@ namespace CnaCity
         RenderHouse,      ///< Suburban render and brick.
         MetalShed,        ///< Industrial cladding.
         Roof,             ///< Flat roofs: felt, gravel and plant rooms.
+        RoofTile,         ///< Pitched roofs: clay pantiles on the suburbs.
+        RoadMarking,      ///< White thermoplastic: crossings and stop lines.
         Foliage,
         Bark,
         StreetFurniture,  ///< Painted metal: lamp columns, signals, shelters.
@@ -61,6 +63,8 @@ namespace CnaCity
         /// it so that a window is the same size on a house and on a tower.
         Vec2 worldScale{4.0f, 4.0f};
         bool doubleSided = false;
+        /// Whether lying snow settles on it. It does not stick to a wall.
+        bool horizontal = false;
     };
 
     /**
@@ -92,7 +96,7 @@ namespace CnaCity
          * most convincing thing a renderer can do with a street.
          */
         void Apply(Microsoft::Xna::Framework::Graphics::PbrEffect& effect, CityMaterial material,
-                   float nightLevel, float wetness) const;
+                   float nightLevel, float wetness, float snow = 0.0f) const;
 
         [[nodiscard]] std::size_t textureBytes() const { return textureBytes_; }
         [[nodiscard]] std::size_t textureCount() const { return owned_.size(); }
