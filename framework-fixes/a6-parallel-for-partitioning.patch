@@ -1,0 +1,84 @@
+Closes CNA-FINDINGS A6 -- Parallel::For creates one operating-system thread per iteration.
+AGAINST ../../sharp-runtimenext, not cnanext.
+
+WHAT IS WRONG
+  Parallel::For launches one std::async per index and waits every maxDeg of them. The batching
+  bounds how many threads exist at once -- which is what fixed the 50 000-thread crash the comment
+  above it describes -- but not how many are *created*: a loop of N iterations still creates N
+  threads, N/maxDeg batches deep, and libstdc++'s std::async does not pool.
+
+  For a loop that runs once over a large collection the creation cost amortises away, and it is
+  the right tool: cna-city uses it exactly there, to generate a hundred thousand citizens. For a
+  loop running thirty times a second it is thousands of thread creations per second and the
+  creations cost more than the work -- which is why cna-city's tick has a persistent pool of its
+  own rather than using this.
+
+WHAT THIS CHANGES
+  One launch per *worker* over a contiguous range, which is what .NET's TPL does. Thread creations
+  drop from N to min(maxDeg, N) per call. The public API does not change.
+
+  Contracts: iterations of a Parallel::For have never been ordered or isolated from each other, so
+  partitioning takes nothing away. An exception still abandons the rest of its own partition and
+  surfaces in the AggregateException -- the partition is larger than one iteration now, which
+  matches .NET, where a partition is also abandoned as a unit.
+
+STATE OF THIS PATCH -- READ THIS ONE BEFORE APPLYING
+  Applies cleanly, and a consumer translation unit that calls Parallel::For compiles cleanly
+  against it. It has NOT been run, and unlike the two cnanext patches beside it this one changes
+  *behaviour* rather than filling in a missing call: it must go through sharp-runtime's own
+  threading-tasks test suite before it lands. In particular the ParallelLoopState overloads and
+  both ForEach variants are NOT touched here and still launch per item; they want the same
+  treatment and a careful look at what Break and Stop should mean across a partition.
+
+  A useful end-to-end check afterwards, because it exercises the changed path over a hundred
+  thousand items and compares the result bit for bit:
+
+      cd ../cna-city && cmake --build build -j$(nproc)
+      ./build/cna-city --seed 42 --agents 100000 --simulate 2h --checksum
+
+  The six digests must be unchanged from before the patch, and the two "reproduced" lines must both
+  say yes. Population generation runs through Parallel::For, so a partitioning that changed which
+  citizen got which home would move CITY and AGENTS immediately.
+
+--- a/modules/threading-tasks/include/System/Threading/Tasks/Parallel.hpp	2026-08-19 06:56:09.704570360 +0200
++++ b/modules/threading-tasks/include/System/Threading/Tasks/Parallel.hpp	2026-09-03 20:19:02.771457461 +0200
+@@ -276,11 +276,34 @@
+ 
+             std::vector<std::future<void>> futures;
+             std::vector<std::exception_ptr> exceptions;
+-            for (intcs i = fromInclusive; i < toExclusive; ++i) {
+-                futures.push_back(std::async(std::launch::async, [body, i]{ body(i); }));
+-                if (static_cast<intcs>(futures.size()) >= maxDeg) {
+-                    waitAllCollectingExceptions(futures, exceptions);
+-                    futures.clear();
++
++            // One launch per *worker*, over a contiguous range, rather than one per iteration.
++            //
++            // Batching by maxDeg bounds how many threads exist at once, which is what stopped the
++            // 50 000-thread crash described above -- but it does not bound how many are *created*:
++            // a loop of N iterations still creates N of them, N/maxDeg batches deep, and
++            // libstdc++'s std::async does not pool. For a loop that runs once over a large
++            // collection the creation cost amortises away. For a loop that runs thirty times a
++            // second it is thousands of thread creations per second, and the creations cost more
++            // than the work they carry -- measured by CNA City, which uses this for population
++            // generation (where it is the right tool) and had to write its own persistent pool for
++            // the tick (where it was not).
++            //
++            // Partitioning is also what real .NET does, and it changes no contract that was being
++            // relied on: the iterations of a Parallel::For have never been ordered or isolated
++            // from each other, and an exception still abandons the rest of its own partition and
++            // surfaces in the AggregateException.
++            const intcs total = toExclusive - fromInclusive;
++            if (total > 0) {
++                const intcs workers = maxDeg < total ? maxDeg : total;
++                const intcs chunk = (total + workers - 1) / workers;
++                for (intcs w = 0; w < workers; ++w) {
++                    const intcs begin = fromInclusive + w * chunk;
++                    if (begin >= toExclusive) break;
++                    const intcs end = (begin + chunk < toExclusive) ? begin + chunk : toExclusive;
++                    futures.push_back(std::async(std::launch::async, [body, begin, end]{
++                        for (intcs i = begin; i < end; ++i) body(i);
++                    }));
+                 }
+             }
+             waitAllCollectingExceptions(futures, exceptions);

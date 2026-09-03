@@ -32,7 +32,15 @@ namespace CnaCity
         /// Demand at the busiest moment of the day is around 35 trips a simulated second, and a
         /// pass runs at least every 1.5 of those, so the budget is roughly six times what the peak
         /// actually asks for. The overflow is deferred rather than dropped.
-        constexpr std::uint32_t kPlanBudgetPerTick = 320;
+        ///
+        /// It is per hundred thousand citizens rather than absolute, and the scaling sweep is what
+        /// asked for that. At a million agents a fixed 320 was deferring 96% of the peak against
+        /// 65% at a hundred thousand: nothing broke -- no memory, no exhausted route pool, the
+        /// tick stayed proportional -- but the city took ten times as long to get moving, which is
+        /// a benchmark measuring a queue rather than a simulation. The floor keeps the
+        /// hundred-thousand case byte-identical to what it was, which is what the documented
+        /// numbers and the replay files were measured against.
+        constexpr std::uint32_t kPlanBudgetPer100k = 320;
         /// Decisions are checked at a fraction of the tick rate, staggered across agents.
         constexpr std::uint32_t kDecisionStride = 8;
         constexpr float kArriveRadius = 3.2f;
@@ -748,7 +756,10 @@ namespace CnaCity
             std::copy(sortActivity_.begin(), sortActivity_.end(), wantsActivity_.begin());
             std::copy(sortFlag_.begin(), sortFlag_.end(), wantsFlag_.begin());
         }
-        const std::uint32_t budget = std::min(wanted, kPlanBudgetPerTick);
+        const auto scaledBudget = static_cast<std::uint32_t>(
+            std::max<std::uint64_t>(kPlanBudgetPer100k,
+                                    static_cast<std::uint64_t>(count) * kPlanBudgetPer100k / 100000));
+        const std::uint32_t budget = std::min(wanted, scaledBudget);
         stats_.tripsDeferred = wanted - budget;
         // Rotating where the budget starts stops low agent indices from always winning the queue,
         // which would show up as one corner of the city leaving for work before the rest of it.

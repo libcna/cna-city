@@ -41,6 +41,12 @@ namespace CnaCity
             double cacheHitRate = 0.0;
             std::uint32_t peakTravelling = 0;
             std::uint64_t gridlocked = 0;
+            /// The two things that saturate before anything breaks, and the reason a scaling
+            /// sweep needs more than a millisecond count: a tick that stays cheap because the
+            /// planner is refusing work, or because the route pool has run out of slots, is a
+            /// tick that has stopped measuring the same thing.
+            std::uint32_t peakDeferred = 0;
+            std::uint64_t routePoolExhausted = 0;
         };
 
         double ElapsedMs(const System::Diagnostics::Stopwatch& watch)
@@ -112,6 +118,7 @@ namespace CnaCity
                 const std::uint32_t travelling = stats.walking + stats.driving + stats.riding +
                                                  stats.waitingTrain;
                 result.peakTravelling = std::max(result.peakTravelling, travelling);
+                result.peakDeferred = std::max(result.peakDeferred, stats.tripsDeferred);
 
                 if (verbose && t % 600 == 0)
                     std::printf("    %s  %-14s %2.0fC  travelling %6u  %.2f ms\n",
@@ -142,6 +149,7 @@ namespace CnaCity
                                       ? static_cast<double>(routes.hits) / static_cast<double>(routes.queries)
                                       : 0.0;
             result.gridlocked = sim.traffic().gridlockedCount();
+            result.routePoolExhausted = static_cast<std::uint64_t>(sim.routes().exhaustedCount());
             return result;
         }
         /**
@@ -508,14 +516,16 @@ namespace CnaCity
             results.push_back(RunOneScale(options.sim, agents, 6.0f, false, options.loadPath));
         }
 
-        std::printf("\n%-9s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %9s\n", "agents", "setup",
-                    "mean", "p99", "worst", "decide", "walk", "crowd", "traffic", "metro", "bus",
-                    "MB", "peak");
+        std::printf("\n%-9s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %9s %9s %9s\n", "agents",
+                    "setup", "mean", "p99", "worst", "decide", "walk", "crowd", "traffic", "metro",
+                    "bus", "MB", "peak", "deferred", "poolfull");
         for (const ScaleResult& r : results)
             std::printf("%-9u %8.0f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.1f "
-                        "%9u\n",
+                        "%9u %9u %9llu\n",
                         r.agents, r.setupMs, r.meanMs, r.p99Ms, r.worstMs, r.decisionMs, r.walkMs,
-                        r.crowdMs, r.trafficMs, r.metroMs, r.busMs, r.memoryMb, r.peakTravelling);
+                        r.crowdMs, r.trafficMs, r.metroMs, r.busMs, r.memoryMb, r.peakTravelling,
+                        r.peakDeferred,
+                        static_cast<unsigned long long>(r.routePoolExhausted));
 
         // Scaling, which is the number the whole exercise is for. Linear would be 1.0.
         if (results.size() > 1)
@@ -543,14 +553,16 @@ namespace CnaCity
             }
             std::fprintf(file, "agents,setup_ms,mean_ms,p99_ms,worst_ms,decision_ms,walk_ms,"
                                "crowd_ms,traffic_ms,metro_ms,bus_ms,memory_mb,route_queries,cache_hit,"
-                               "peak_travelling,gridlocked\n");
+                               "peak_travelling,gridlocked,peak_deferred,route_pool_exhausted\n");
             for (const ScaleResult& r : results)
                 std::fprintf(file, "%u,%.3f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.2f,%llu,"
-                                   "%.4f,%u,%llu\n",
+                                   "%.4f,%u,%llu,%u,%llu\n",
                              r.agents, r.setupMs, r.meanMs, r.p99Ms, r.worstMs, r.decisionMs,
                              r.walkMs, r.crowdMs, r.trafficMs, r.metroMs, r.busMs, r.memoryMb,
                              static_cast<unsigned long long>(r.routeQueries), r.cacheHitRate,
-                             r.peakTravelling, static_cast<unsigned long long>(r.gridlocked));
+                             r.peakTravelling, static_cast<unsigned long long>(r.gridlocked),
+                             r.peakDeferred,
+                             static_cast<unsigned long long>(r.routePoolExhausted));
             std::fclose(file);
             std::printf("\nwrote %s\n", options.csvPath.c_str());
         }

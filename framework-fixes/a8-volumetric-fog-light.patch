@@ -1,0 +1,89 @@
+Closes CNA-FINDINGS A8 -- volumetric fog is enabled by a setting and lit by nothing.
+
+WHAT IS WRONG
+  RenderPipeline constructs a VolumetricFogPass, adds it to the chain whenever
+  RenderPipelineSettings::getVolumetricFogDensity() is above zero, and never calls setLight on it.
+  setLight is public and, from outside, unreachable: the pipeline owns the pass and exposes no
+  accessor.
+
+  The pass therefore runs with its own defaults -- VolumetricFogPass.hpp lines 120-122, a null
+  shadow map, a direction of (0, -1, 0) and a colour of (1, 0.97, 0.9). That is not "unlit fog".
+  It is a march that integrates scattering against a white sun pointing straight down, wherever
+  the scene's sun actually is, with nothing shadowing it; and above the rooflines, where the depth
+  image has nothing in it, it returns a band of colour across the sky.
+
+WHAT THIS CHANGES
+  setShadowScene already receives the light and the shadow map the fog needs, and stores both.
+  It now forwards them. A getVolumetricFogPassEXT() accessor is added for the case setShadowScene
+  cannot serve: fog with no shadow pass at all, or fog lit by something other than the sun the
+  shadows are cast from.
+
+STATE OF THIS PATCH
+  Applies cleanly (git apply --check) and the patched translation unit compiles cleanly against the
+  patched header, with the exact flags cna-city builds CNA with. It has NOT been run: cnanext is a
+  shared checkout and had another session's uncommitted work in modules/platform at the time, so it
+  was not modified. The recipe below is what closes that gap.
+
+HOW TO VERIFY IT, FROM THE PROGRAM THAT FOUND IT
+  cna-city turns volumetric fog off in RenderPipelineSettings for this reason and says so in
+  CityGame::ApplyQuality. To check the fix:
+
+    1. git apply this patch in ../../cnanext
+    2. in cna-city, re-enable it: settings.setVolumetricFogDensity(0.015f) at ultra quality
+    3. cmake --build build -j$(nproc)
+    4. ./build/cna-city --quality ultra --weather fog --fixed-weather --time 7.0 \
+                        --camera orbit --screenshot shots/fog.png --frames 400
+
+  Before: a band of red and green across the sky above the rooflines, in fog weather only.
+  After: the fog is lit by the same sun the city is, and shadowed by the same cascade -- so it is
+  a beam through the streets rather than a wash, and there is nothing above the rooflines.
+
+--- a/modules/graphics-ext/include/CNA/Graphics/RenderPipeline.hpp	2026-08-20 21:14:13.536502649 +0200
++++ b/modules/graphics-ext/include/CNA/Graphics/RenderPipeline.hpp	2026-09-03 19:38:38.267414501 +0200
+@@ -259,6 +259,16 @@
+                             std::function<void()> drawCasters);
+ 
+         /**
++         * @brief The volumetric fog pass, for a game that lights it itself.
++         *
++         * @ref setShadowScene forwards its light and shadow map here, which is right for the
++         * common case and is what makes the setting usable at all. A game that wants volumetric
++         * fog *without* a shadow pass -- or lit by something other than the sun it casts shadows
++         * from -- has no other way to reach the pass, because the pipeline owns it.
++         */
++        [[nodiscard]] CNAEXT VolumetricFogPass& getVolumetricFogPassEXT();
++
++        /**
+          * @brief Supplies a skybox for `begin` to draw behind the scene.
+          *
+          * plans/plan_modern.md MOD-1104. Drawn immediately after the scene target is bound and cleared,
+--- a/modules/graphics-ext/src/RenderPipeline.cpp	2026-08-20 21:14:13.516502649 +0200
++++ b/modules/graphics-ext/src/RenderPipeline.cpp	2026-09-03 19:38:38.267414501 +0200
+@@ -480,6 +480,27 @@
+         shadowLight_  = light;
+         shadowBounds_ = sceneBounds;
+         drawCasters_  = std::move(drawCasters);
++
++        // The volumetric fog is lit by this light and blocked by this shadow map, and until now it
++        // was told about neither. VolumetricFogPass::setLight is public and was unreachable: the
++        // pipeline constructs the pass, adds it to the chain whenever the density is above zero,
++        // and never calls it -- so the pass ran with its own defaults, a white light pointing
++        // straight down and no shadow map at all. That is not "no fog": the march integrates
++        // scattering against a sun that has nothing to do with the scene's, unshadowed, and above
++        // the rooflines where the depth image is empty it returns a band of colour across the sky.
++        //
++        // Found by cna-city, which turned the setting on, got the band, and could not turn the
++        // light on from outside. Recorded there as CNA-FINDINGS A8.
++        volumetricFogPass_->setLight(
++            shadowMap, light.Direction,
++            Microsoft::Xna::Framework::Vector3(light.Color.X * light.Intensity,
++                                               light.Color.Y * light.Intensity,
++                                               light.Color.Z * light.Intensity));
++    }
++
++    VolumetricFogPass& RenderPipeline::getVolumetricFogPassEXT()
++    {
++        return *volumetricFogPass_;
+     }
+ 
+     bool RenderPipeline::didShadowPassRun() const

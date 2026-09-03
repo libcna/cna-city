@@ -1,0 +1,178 @@
+Closes CNA-FINDINGS A3 -- Texture2D allocates a mip chain but never fills one, and says "generate".
+
+WHAT IS WRONG
+  Texture2D(device, width, height, mipMap, format) sets levelCount_ = CalculateMipLevels(w, h) and
+  writes nothing. SetData writes exactly the level it is given. There is no GenerateMipMaps in the
+  class. That is faithful to XNA, where mip levels arrive from the content pipeline -- but a game
+  that generates its own textures has no content pipeline, and a chain whose lower levels were
+  never written shows it the moment the camera pulls back. A city seen from four hundred metres is
+  almost entirely minified.
+
+  The header meanwhile says "True to generate a full mipmap chain", which is the one thing it does
+  not do.
+
+WHAT THIS CHANGES
+  The doc comment says "allocate", and says what to do instead.
+
+  Texture2D::SetDataWithMipsEXT(data, count, sRGB) sets level 0 and box-filters the rest from it,
+  averaging in *linear light* when the texels are sRGB-encoded. That is the reason this belongs in
+  the engine rather than in each game: sRGB is concave, so the average of four encoded texels is
+  brighter than the encoding of their average, and every level comes out paler than the one above.
+  A minified city fades towards white as the camera pulls back -- and it is wrong in a way that
+  reads as aerial perspective rather than as a bug. Alpha is averaged linearly and never encoded,
+  because it is coverage rather than colour; encoding it hardens every soft edge a level at a time.
+
+  cna-city already does this by hand in Materials.cpp (UploadWithMips) -- about forty lines that
+  every consumer generating its own textures writes again, and gets wrong in the same way.
+
+STATE OF THIS PATCH
+  Applies cleanly (git apply --check) and both patched translation units compile cleanly with the
+  exact flags cna-city builds CNA with. It has NOT been run: cnanext is a shared checkout and had
+  another session's uncommitted work in modules/platform at the time, so it was not modified.
+
+HOW TO VERIFY IT, FROM THE PROGRAM THAT FOUND IT
+    1. git apply this patch in ../../cnanext
+    2. in cna-city, replace the body of UploadWithMips in src/Materials.cpp with a Texture2D
+       constructed with mipMap = true followed by SetDataWithMipsEXT(pixels, count, sRGB)
+    3. cmake --build build -j$(nproc)
+    4. ./build/cna-city --camera orbit --time 11.0 --weather clear --fixed-weather \
+                        --screenshot shots/mips.png --frames 400
+
+  The aerial view must be indistinguishable from the one cna-city's own chain produces. If the
+  suburbs come out paler, the filter is averaging in the encoded space.
+
+--- a/modules/graphics/include/Microsoft/Xna/Framework/Graphics/Texture2D.hpp	2026-08-28 10:08:13.819243677 +0200
++++ b/modules/graphics/include/Microsoft/Xna/Framework/Graphics/Texture2D.hpp	2026-09-03 19:52:37.827429377 +0200
+@@ -81,7 +81,15 @@
+          * @param graphicsDevice The device to create the texture on.
+          * @param width          Width in pixels.
+          * @param height         Height in pixels.
+-         * @param mipMap         True to generate a full mipmap chain.
++         * @param mipMap         True to **allocate** a full mipmap chain.
++         *
++         *                       Allocate, not generate. The levels are counted and reserved; not
++         *                       one of them is written. That is faithful to XNA, where mip levels
++         *                       arrive from the content pipeline -- but a game that generates its
++         *                       own textures has no content pipeline, and a chain whose lower
++         *                       levels were never written shows it the moment the camera pulls
++         *                       back. Fill them with @ref SetDataWithMipsEXT, or level by level
++         *                       with the @ref SetData overload that takes one.
+          * @param format         The desired surface format.
+          * @throws System::NotSupportedException if @p width or @p height exceeds the active
+          *         renderer's maximum texture dimension (see GraphicsDevice::GetMaxTextureDimension()).
+@@ -121,6 +129,27 @@
+         void SetData(const Color* data, int elementCount);
+ 
+         /**
++         * @brief Sets level 0 and box-filters the rest of the chain from it.
++         *
++         * @note CNAEXT -- not part of the XNA 4.0 API, and the counterpart of the 
++         *       constructor flag actually allocating rather than generating.
++         *
++         * The filter averages in **linear light** when @p sRGB is true. That is the whole reason
++         * this belongs in the engine rather than in each game: averaging four sRGB-encoded texels
++         * as though they were linear makes every level a little brighter than the one above it, so
++         * a city fades towards white as the camera pulls back -- and it is wrong in a way that
++         * looks like a lighting choice rather than like a bug. Every consumer that generates its
++         * own textures writes these forty lines, and gets them wrong the same way.
++         *
++         * @param data         Level 0, @ref getWidthProperty * @ref getHeightProperty texels.
++         * @param elementCount How many texels @p data holds.
++         * @param sRGB         True when the texels are sRGB-encoded, which albedo maps are and
++         *                     normal, roughness and metallic maps are not.
++         * @throws std::invalid_argument if the count does not match level 0.
++         */
++        CNAEXT void SetDataWithMipsEXT(const Color* data, int elementCount, bool sRGB);
++
++        /**
+          * @brief Uploads raw Color-compatible data to a mip level and optional sub-rectangle.
+          * @param level        Mip level to write (0 = full size).
+          * @param rect         Sub-rectangle to update, or nullptr for the entire level.
+--- a/modules/graphics/src/Xna/Texture2D.cpp	2026-08-31 00:42:48.365419129 +0200
++++ b/modules/graphics/src/Xna/Texture2D.cpp	2026-09-03 19:53:21.611430153 +0200
+@@ -377,6 +377,85 @@
+     // SetData
+     // -----------------------------------------------------------------------
+ 
++    void Texture2D::SetDataWithMipsEXT(const Color* data, int elementCount, bool sRGB)
++    {
++        if (isDisposed_)
++            throw System::ObjectDisposedException("Texture2D");
++        const int width = getWidthProperty();
++        const int height = getHeightProperty();
++        if (data == nullptr || elementCount != width * height)
++            throw std::invalid_argument(
++                "Texture2D::SetDataWithMipsEXT: the data must be exactly level 0");
++
++        SetData(data, elementCount);
++        if (getLevelCountProperty() <= 1) return;
++
++        // A box filter, averaging in linear light when the texels are sRGB-encoded. Doing it in
++        // the encoded space is the classic mistake and it does not look like a mistake: sRGB is
++        // concave, so the average of four encoded values is brighter than the encoding of their
++        // average, and every level comes out a little paler than the one above. A minified city
++        // fades towards white as the camera pulls back, which reads as aerial perspective.
++        const auto toLinear = [sRGB](std::uint8_t v) {
++            const float c = static_cast<float>(v) / 255.0f;
++            if (!sRGB) return c;
++            return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
++        };
++        const auto toEncoded = [sRGB](float c) {
++            const float e = !sRGB ? c
++                                  : (c <= 0.0031308f ? c * 12.92f
++                                                     : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f);
++            const float clamped = e < 0.0f ? 0.0f : (e > 1.0f ? 1.0f : e);
++            return static_cast<std::uint8_t>(clamped * 255.0f + 0.5f);
++        };
++
++        std::vector<Color> source(data, data + elementCount);
++        std::vector<Color> level;
++        int sourceWidth = width;
++        int sourceHeight = height;
++        for (int mip = 1; mip < getLevelCountProperty(); ++mip)
++        {
++            const int levelWidth = sourceWidth > 1 ? sourceWidth / 2 : 1;
++            const int levelHeight = sourceHeight > 1 ? sourceHeight / 2 : 1;
++            level.assign(static_cast<std::size_t>(levelWidth) * levelHeight, Color());
++            for (int y = 0; y < levelHeight; ++y)
++                for (int x = 0; x < levelWidth; ++x)
++                {
++                    // Clamped rather than wrapped, so a 1-wide level averages the column with
++                    // itself instead of with the far edge.
++                    const int x0 = std::min(x * 2, sourceWidth - 1);
++                    const int x1 = std::min(x * 2 + 1, sourceWidth - 1);
++                    const int y0 = std::min(y * 2, sourceHeight - 1);
++                    const int y1 = std::min(y * 2 + 1, sourceHeight - 1);
++                    const Color* const taps[4] = {
++                        &source[static_cast<std::size_t>(y0) * sourceWidth + x0],
++                        &source[static_cast<std::size_t>(y0) * sourceWidth + x1],
++                        &source[static_cast<std::size_t>(y1) * sourceWidth + x0],
++                        &source[static_cast<std::size_t>(y1) * sourceWidth + x1]};
++
++                    float r = 0.0f, g = 0.0f, b = 0.0f, a = 0.0f;
++                    for (const Color* tap : taps)
++                    {
++                        r += toLinear(tap->getRProperty());
++                        g += toLinear(tap->getGProperty());
++                        b += toLinear(tap->getBProperty());
++                        // Alpha is coverage, not colour: it is linear already and encoding it
++                        // would make every soft edge harden a level at a time.
++                        a += static_cast<float>(tap->getAProperty()) / 255.0f;
++                    }
++                    Color& out = level[static_cast<std::size_t>(y) * levelWidth + x];
++                    out.setRProperty(toEncoded(r * 0.25f));
++                    out.setGProperty(toEncoded(g * 0.25f));
++                    out.setBProperty(toEncoded(b * 0.25f));
++                    out.setAProperty(static_cast<std::uint8_t>(a * 0.25f * 255.0f + 0.5f));
++                }
++
++            SetData(mip, nullptr, level.data(), 0, static_cast<int>(level.size()));
++            source.swap(level);
++            sourceWidth = levelWidth;
++            sourceHeight = levelHeight;
++        }
++    }
++
+     void Texture2D::SetData(const Color* data, int elementCount)
+     {
+         if (isDisposed_)

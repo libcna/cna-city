@@ -114,6 +114,19 @@ the way there already.
 game do it either. `VolumetricFogPass::setLight(shadowMap, lightDirection, lightColour)` is public
 and unreachable.
 
+More precisely than "no light", and the precision matters: the pass runs with the defaults on
+`VolumetricFogPass.hpp` lines 120-122 -- a null shadow map, a direction of `(0, -1, 0)` and a
+colour of `(1, 0.97, 0.9)`. So it integrates against a white sun pointing straight down wherever
+the scene's sun actually is, unshadowed. Everything else the pass needs it reads from
+`PostProcessContext::settings`; the light is the one input that does not arrive that way, and it is
+the one input the pass's own header calls "the one that makes the pass worth its cost".
+
+**A patch is in [`framework-fixes/`](framework-fixes/a8-volumetric-fog-light.patch)**:
+`setShadowScene` already receives the light and the shadow map and stores both, so it forwards
+them, and a `getVolumetricFogPassEXT()` accessor covers fog without a shadow pass. It applies
+cleanly and compiles; it has not been run, because `cnanext` is shared and had another session's
+work in it.
+
 What that produces is not "no fog". The march runs 32 slices with no light direction and no shadow
 map, and above the rooflines -- where the depth image has nothing in it -- it integrates scattering
 against nothing and returns a band of red and green across the sky. It is only visible in weather
