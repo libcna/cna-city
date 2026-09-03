@@ -383,3 +383,34 @@ two machines meant comparing two scrollbacks.
   what a CPU-side stopwatch cannot: SSAO appears only in the street-level views, because ambient
   occlusion switches itself off above roof height. `--headless --report` writes the simulation half
   alone.
+
+---
+
+## P15 — Comparing runs, and the shape of comparing renderers
+
+- [x] **P15.1 `--compare A B [...]`.** Reads report directories back in and writes one page with
+  them side by side. Two uses want the same page: the renderer comparison this project exists to
+  make possible, and the one that comes up daily -- did this commit change anything?
+
+- [x] **P15.2 A difference is measured against the noise, not against zero.** A change smaller than
+  the spread of either run is labelled *within noise*. A benchmark that reports every wobble as a
+  regression is one whose regressions get ignored, and this project has already produced a 30%
+  "difference" that was nothing but a busy machine.
+
+- [x] **P15.3 Reports of different cities are refused loudly.** Two runs from different seeds or
+  different generators are two different workloads; the city digest in each report is what catches
+  that, and putting their numbers in one table without saying so is the most confident possible way
+  to reach a wrong conclusion.
+
+- [x] **P15.4 `scripts/compare-renderers.sh`.** The sweep across CNA's renderers. Deliberately not
+  run here and deliberately not wired into anything: each renderer is a separate configure and a
+  full rebuild of CNA, minutes of compilation and hundreds of megabytes of objects. The script
+  reuses the workspace's one shared scratch build directory and measures the renderers one after
+  another, because the alternative -- a build tree per renderer -- is a directory nobody ever
+  deletes.
+
+### The measurement still to take
+
+The comparison machinery is done and tested; what has not been done is spending the disk and the
+compilation on a second renderer. That is a decision about this machine rather than about the code,
+and the script makes it one command when somebody wants it.

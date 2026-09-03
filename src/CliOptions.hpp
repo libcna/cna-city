@@ -17,7 +17,8 @@ namespace CnaCity
         Headless,      ///< Simulation only: no window, no graphics device at all.
         Checksum,      ///< Simulate, print a digest of the world, exit.
         Replay,        ///< Re-run a recorded file and report whether it still reproduces.
-        Report         ///< Run the sweep and write a directory of results plus an HTML page.
+        Report,        ///< Run the sweep and write a directory of results plus an HTML page.
+        Compare        ///< Read several report directories and write one page comparing them.
     };
 
     /** @brief Visual quality, which is a bundle of pipeline settings rather than one dial. */
@@ -73,6 +74,9 @@ namespace CnaCity
         /// Frames measured per viewpoint, after a warm-up of the same length. Long enough that a
         /// shader compile or a cold cache does not become the measurement.
         int reportFrames = 240;
+        /// --compare: the report directories to read, in the order they should appear.
+        std::vector<std::string> comparePaths;
+        std::string comparisonPath = "comparison.html";
         std::string savePath;     ///< --save: write a snapshot when the run ends.
         std::string loadPath;     ///< --load: start from a snapshot instead of from hour zero.
         std::string snapshotNote; ///< --note: free text stored in the snapshot header.

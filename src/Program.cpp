@@ -34,6 +34,8 @@ int main(int argc, char** argv)
             return CnaCity::RunReplayFile(options);
         case CnaCity::RunMode::Report:
             return CnaCity::RunReport(options);
+        case CnaCity::RunMode::Compare:
+            return CnaCity::RunCompare(options);
         case CnaCity::RunMode::Interactive:
             break;
     }

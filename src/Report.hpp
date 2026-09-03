@@ -100,6 +100,24 @@ namespace CnaCity
         std::vector<PassRow> passes;
     };
 
+    /** @brief Reads a report directory back in. Used by the comparison. */
+    [[nodiscard]] bool ReadReport(const std::string& directory, Report& out, std::string& error);
+
+    /**
+     * @brief Writes one page comparing several reports.
+     *
+     * Two uses, and they want the same page. One is the renderer comparison this project exists
+     * to make possible -- the same city, seed, hour and camera through OPENGLES3, OPENGL33 and
+     * Vulkan, with the differences in one table. The other is the one that comes up daily: did
+     * this commit change anything, and by how much against the run-to-run spread?
+     *
+     * A difference smaller than the spread of either run is not reported as a change, because a
+     * benchmark that calls noise a regression is a benchmark people stop reading.
+     */
+    [[nodiscard]] bool WriteComparison(const std::string& path,
+                                       const std::vector<std::string>& labels,
+                                       const std::vector<Report>& reports, std::string& error);
+
     /** @brief Fills in everything about the machine that does not need a graphics device. */
     [[nodiscard]] SystemInfo DescribeSystem();
 

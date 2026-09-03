@@ -164,6 +164,110 @@ namespace CnaCityTests
         std::filesystem::remove(file);
     }
 
+    TEST(ReportComparison, AReportSurvivesARoundTripThroughItsOwnFiles)
+    {
+        // The comparison reads what the report wrote, so the two have to agree about the column
+        // order -- and a CSV whose columns have shifted reads as a set of plausible numbers rather
+        // than as an error.
+        const std::string directory = ReportDir("roundtrip");
+        const Report written = SampleReport();
+        std::string error;
+        ASSERT_TRUE(WriteReport(directory, written, error)) << error;
+
+        Report read;
+        ASSERT_TRUE(ReadReport(directory, read, error)) << error;
+        ASSERT_EQ(read.simulation.size(), written.simulation.size());
+        for (std::size_t i = 0; i < read.simulation.size(); ++i)
+        {
+            EXPECT_EQ(read.simulation[i].agents, written.simulation[i].agents);
+            EXPECT_NEAR(read.simulation[i].meanMs, written.simulation[i].meanMs, 1e-4);
+            EXPECT_NEAR(read.simulation[i].spreadMs, written.simulation[i].spreadMs, 1e-4);
+            EXPECT_NEAR(read.simulation[i].memoryMb, written.simulation[i].memoryMb, 1e-2);
+            EXPECT_EQ(read.simulation[i].runs, written.simulation[i].runs);
+        }
+        ASSERT_EQ(read.rendering.size(), 1u);
+        EXPECT_EQ(read.rendering[0].view, "street");
+        EXPECT_NEAR(read.rendering[0].frameMs, 11.5, 1e-4);
+        ASSERT_EQ(read.passes.size(), 1u);
+        EXPECT_EQ(read.passes[0].pass, "bloom");
+        EXPECT_EQ(read.system.seed, written.system.seed);
+        EXPECT_EQ(read.system.cityDigest, written.system.cityDigest);
+    }
+
+    TEST(ReportComparison, ADifferenceInsideTheNoiseIsNotCalledAChange)
+    {
+        // The rule that decides whether people keep reading the output. A benchmark that reports
+        // every wobble as a regression is one whose regressions get ignored.
+        Report before = SampleReport();
+        Report after = SampleReport();
+        before.simulation[1].spreadMs = 0.50;
+        after.simulation[1].spreadMs = 0.50;
+        after.simulation[1].meanMs = before.simulation[1].meanMs + 0.20;   // inside the spread
+
+        const std::string path =
+            (std::filesystem::temp_directory_path() / "cna-city-tests" / "noise.html").string();
+        std::string error;
+        ASSERT_TRUE(WriteComparison(path, {"before", "after"}, {before, after}, error)) << error;
+        const std::string html = Slurp(std::filesystem::path(path).parent_path().string(),
+                                       "noise.html");
+        EXPECT_NE(html.find("within noise"), std::string::npos);
+        EXPECT_EQ(html.find("class=\"worse\""), std::string::npos);
+        std::filesystem::remove(path);
+    }
+
+    TEST(ReportComparison, ARealRegressionIsCalledOne)
+    {
+        // One population, so the assertion is about the row that was changed. The sample has two,
+        // and the untouched one is correctly reported as being within its noise -- which made the
+        // first version of this test pass for the wrong reason.
+        Report before = SampleReport();
+        before.simulation.erase(before.simulation.begin());
+        Report after = before;
+        before.simulation[0].spreadMs = 0.05;
+        after.simulation[0].spreadMs = 0.05;
+        after.simulation[0].meanMs = before.simulation[0].meanMs * 1.4;
+
+        const std::string path =
+            (std::filesystem::temp_directory_path() / "cna-city-tests" / "worse.html").string();
+        std::string error;
+        ASSERT_TRUE(WriteComparison(path, {"before", "after"}, {before, after}, error)) << error;
+        const std::string html = Slurp(std::filesystem::path(path).parent_path().string(),
+                                       "worse.html");
+        EXPECT_NE(html.find("class=\"worse\""), std::string::npos);
+        EXPECT_EQ(html.find("within noise"), std::string::npos);
+        std::filesystem::remove(path);
+    }
+
+    TEST(ReportComparison, ComparingDifferentCitiesIsRefusedLoudly)
+    {
+        // Two reports from different seeds are two different workloads, and putting their numbers
+        // in one table is the most confident possible way to reach a wrong conclusion.
+        Report before = SampleReport();
+        Report after = SampleReport();
+        after.system.cityDigest = "fedcba9876543210";
+
+        const std::string path =
+            (std::filesystem::temp_directory_path() / "cna-city-tests" / "mixed.html").string();
+        std::string error;
+        ASSERT_TRUE(WriteComparison(path, {"a", "b"}, {before, after}, error)) << error;
+        const std::string html = Slurp(std::filesystem::path(path).parent_path().string(),
+                                       "mixed.html");
+        EXPECT_NE(html.find("different cities"), std::string::npos);
+        std::filesystem::remove(path);
+    }
+
+    TEST(ReportComparison, OneReportIsNotAComparison)
+    {
+        std::string error;
+        const std::string path =
+            (std::filesystem::temp_directory_path() / "cna-city-tests" / "one.html").string();
+        EXPECT_FALSE(WriteComparison(path, {"only"}, {SampleReport()}, error));
+        EXPECT_FALSE(error.empty());
+
+        Report empty;
+        EXPECT_FALSE(ReadReport("/nonexistent-report-directory", empty, error));
+    }
+
     TEST(ReportWriter, TheSystemDescriptionNamesTheBuild)
     {
         // A benchmark that does not say what it measured cannot be compared with anybody else's.

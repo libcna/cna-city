@@ -38,4 +38,7 @@ namespace CnaCity
      * `report.html` behind, so a run can be kept, diffed against another machine, and looked at.
      */
     int RunReport(const CliOptions& options);
+
+    /** @brief Reads several report directories and writes one page comparing them. */
+    int RunCompare(const CliOptions& options);
 }

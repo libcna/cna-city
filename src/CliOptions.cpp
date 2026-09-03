@@ -98,6 +98,8 @@ namespace CnaCity
             "  --csv FILE            Write the benchmark table to FILE\n"
             "  --report DIR          Run the sweep and write CSVs, system.json and report.html\n"
             "  --repeat N            Measure each scale N times for --report (default 3)\n"
+            "  --compare A B [...]   Compare report directories and write comparison.html\n"
+            "  --comparison-out F    Where --compare writes its page\n"
             "  --headless            Simulate with no graphics device at all\n"
             "  --checksum            Simulate, print a digest of the world, and exit\n"
             "  --simulate D          How long --checksum and --record run: 24h, 90m, 600s\n"
@@ -184,6 +186,24 @@ namespace CnaCity
                     return false;
                 }
                 options.reportRepeats = static_cast<int>(n);
+            }
+            else if (arg == "--compare")
+            {
+                // Everything up to the next option is a report directory, so the usual shape --
+                // `--compare before after` -- works without repeating the flag.
+                while (i + 1 < argc && argv[i + 1][0] != '-')
+                    options.comparePaths.emplace_back(argv[++i]);
+                if (options.comparePaths.size() < 2)
+                {
+                    options.error = "--compare needs at least two report directories";
+                    return false;
+                }
+                options.mode = RunMode::Compare;
+            }
+            else if (arg == "--comparison-out")
+            {
+                if (!next(value)) { options.error = "--comparison-out needs a path"; return false; }
+                options.comparisonPath = value;
             }
             else if (arg == "--report")
             {

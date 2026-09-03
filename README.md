@@ -267,6 +267,24 @@ street level              14.29    10.48       2.55        1.27         226     
 
 `--headless --report` writes the simulation half only.
 
+### Comparing two runs
+
+```sh
+./build/cna-city --compare results/before results/after
+```
+
+Writes one page with the two side by side. A difference smaller than the spread of either run is
+labelled **within noise** rather than reported as a change — a benchmark that calls every wobble a
+regression is a benchmark whose regressions get ignored. Two reports whose city digests differ are
+refused loudly, because they are two different workloads and putting their numbers in one table is
+the most confident way to reach a wrong conclusion.
+
+`scripts/compare-renderers.sh` does the same across CNA's renderers — identical seed, hour,
+weather, camera and population through OPENGLES3, OPENGL33, Vulkan and the rest. It is not run by
+default and it is not cheap: each renderer is a separate configure and a full rebuild of CNA, so
+the script reuses one shared scratch build directory and measures them one after another rather
+than leaving a tree per renderer behind.
+
 Each scale is measured `--repeat` times and the **fastest** run is reported with the **spread**
 beside it. That is not cherry-picking: two runs of the same build do identical work, so the
 difference between them is whatever else the machine was doing, and the minimum is the closest

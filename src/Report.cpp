@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <thread>
 
@@ -208,6 +209,235 @@ namespace CnaCity
         }
 #endif
         return info;
+    }
+
+    namespace
+    {
+        /// A very small CSV reader: split on commas, no quoting. The files it reads are the ones
+        /// WriteReport wrote, which contain no commas inside a field -- and a report directory
+        /// somebody has hand-edited is not something to guess about.
+        std::vector<std::vector<std::string>> ReadCsv(const std::filesystem::path& path)
+        {
+            std::vector<std::vector<std::string>> rows;
+            std::ifstream in(path);
+            std::string line;
+            while (std::getline(in, line))
+            {
+                if (line.empty()) continue;
+                std::vector<std::string> cells;
+                std::string cell;
+                std::istringstream fields(line);
+                while (std::getline(fields, cell, ',')) cells.push_back(cell);
+                rows.push_back(std::move(cells));
+            }
+            return rows;
+        }
+
+        double Cell(const std::vector<std::string>& row, std::size_t index)
+        {
+            return index < row.size() ? std::strtod(row[index].c_str(), nullptr) : 0.0;
+        }
+
+        std::string JsonField(const std::string& text, const std::string& key)
+        {
+            const std::string needle = "\"" + key + "\":";
+            const std::size_t at = text.find(needle);
+            if (at == std::string::npos) return {};
+            std::size_t start = text.find_first_not_of(" \t", at + needle.size());
+            if (start == std::string::npos) return {};
+            if (text[start] == '"')
+            {
+                const std::size_t end = text.find('"', start + 1);
+                return end == std::string::npos ? std::string()
+                                                : text.substr(start + 1, end - start - 1);
+            }
+            const std::size_t end = text.find_first_of(",\n}", start);
+            return text.substr(start, end - start);
+        }
+    }
+
+    bool ReadReport(const std::string& directory, Report& out, std::string& error)
+    {
+        const std::filesystem::path root(directory);
+        if (!std::filesystem::exists(root / "simulation.csv"))
+        {
+            error = directory + " does not look like a report directory (no simulation.csv)";
+            return false;
+        }
+
+        std::ifstream json(root / "system.json");
+        std::ostringstream text;
+        text << json.rdbuf();
+        const std::string system = text.str();
+        out.system.renderer = JsonField(system, "renderer");
+        out.system.graphicsCard = JsonField(system, "graphicsCard");
+        out.system.os = JsonField(system, "os");
+        out.system.compiler = JsonField(system, "compiler");
+        out.system.buildType = JsonField(system, "buildType");
+        out.system.cityDigest = JsonField(system, "cityDigest");
+        out.system.takenAt = JsonField(system, "takenAt");
+        out.system.seed = std::strtoull(JsonField(system, "seed").c_str(), nullptr, 10);
+        out.system.workerThreads = std::atoi(JsonField(system, "workerThreads").c_str());
+        out.system.hardwareThreads = std::atoi(JsonField(system, "hardwareThreads").c_str());
+        const std::string load = JsonField(system, "loadAverage");
+        out.system.loadAverage = load.empty() ? -1.0 : std::strtod(load.c_str(), nullptr);
+
+        for (const auto& row : ReadCsv(root / "simulation.csv"))
+        {
+            if (row.empty() || row[0] == "agents") continue;
+            SimulationRow r;
+            r.agents = static_cast<std::uint32_t>(Cell(row, 0));
+            r.setupMs = Cell(row, 1);
+            r.meanMs = Cell(row, 2);
+            r.p99Ms = Cell(row, 3);
+            r.worstMs = Cell(row, 4);
+            r.decisionMs = Cell(row, 5);
+            r.walkMs = Cell(row, 6);
+            r.crowdMs = Cell(row, 7);
+            r.trafficMs = Cell(row, 8);
+            r.metroMs = Cell(row, 9);
+            r.busMs = Cell(row, 10);
+            r.memoryMb = Cell(row, 11);
+            r.routeQueries = static_cast<std::uint64_t>(Cell(row, 12));
+            r.cacheHitRate = Cell(row, 13);
+            r.peakTravelling = static_cast<std::uint32_t>(Cell(row, 14));
+            r.gridlocked = static_cast<std::uint64_t>(Cell(row, 15));
+            r.runs = static_cast<int>(Cell(row, 16));
+            r.spreadMs = Cell(row, 17);
+            out.simulation.push_back(r);
+        }
+
+        for (const auto& row : ReadCsv(root / "rendering.csv"))
+        {
+            if (row.empty() || row[0] == "view") continue;
+            RenderingRow r;
+            r.view = row[0];
+            r.width = static_cast<int>(Cell(row, 1));
+            r.height = static_cast<int>(Cell(row, 2));
+            r.quality = row.size() > 3 ? row[3] : std::string();
+            r.frameMs = Cell(row, 4);
+            r.simulationMs = Cell(row, 5);
+            r.drawMs = Cell(row, 6);
+            r.shadowMs = Cell(row, 7);
+            r.prepassMs = Cell(row, 8);
+            r.sceneMs = Cell(row, 9);
+            r.instanceMs = Cell(row, 10);
+            r.drawCalls = static_cast<std::uint32_t>(Cell(row, 11));
+            r.triangles = static_cast<std::uint32_t>(Cell(row, 12));
+            out.rendering.push_back(r);
+        }
+
+        for (const auto& row : ReadCsv(root / "passes.csv"))
+        {
+            if (row.size() < 3 || row[0] == "view") continue;
+            out.passes.push_back(PassRow{row[0], row[1], std::strtod(row[2].c_str(), nullptr)});
+        }
+        return true;
+    }
+
+    bool WriteComparison(const std::string& path, const std::vector<std::string>& labels,
+                         const std::vector<Report>& reports, std::string& error)
+    {
+        if (reports.size() < 2)
+        {
+            error = "a comparison needs at least two reports";
+            return false;
+        }
+
+        std::ostringstream html;
+        html << "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
+                "<title>CNA City comparison</title>\n<style>\n"
+                "body{font:14px/1.5 system-ui,sans-serif;margin:0;padding:32px;background:#f6f7f9;"
+                "color:#1d2530}main{max-width:900px;margin:0 auto}\n"
+                "h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:32px 0 8px}\n"
+                ".sub{color:#5a6675;margin:0 0 24px}\n"
+                "table{border-collapse:collapse;width:100%;background:#fff;"
+                "font-variant-numeric:tabular-nums}\n"
+                "th,td{padding:6px 10px;border-bottom:1px solid #e4e7ec;text-align:right}\n"
+                "th:first-child,td:first-child{text-align:left}\n"
+                "th{background:#eef1f5;font-weight:600}\n"
+                ".worse{color:#b1560f;font-weight:600}.better{color:#1f7a4d;font-weight:600}\n"
+                ".noise{color:#8892a0}\n"
+                ".warn{background:#fff4e5;border:1px solid #f0c37b;padding:8px 12px;margin:8px 0}\n"
+                "footer{color:#5a6675;margin-top:40px;font-size:12px}\n</style>\n</head>\n<body>\n"
+                "<main>\n<h1>CNA City comparison</h1>\n";
+
+        html << "<p class=\"sub\">";
+        for (std::size_t i = 0; i < reports.size(); ++i)
+            html << (i ? " &middot; " : "") << Escape(labels[i]) << " ("
+                 << Escape(reports[i].system.renderer) << ")";
+        html << "</p>\n";
+
+        // The comparison is only meaningful if every run measured the same city. Two reports from
+        // different seeds or different generators are two different workloads, and putting their
+        // numbers in one table is the most confident way to draw a wrong conclusion.
+        bool sameCity = true;
+        for (const Report& r : reports)
+            sameCity = sameCity && r.system.cityDigest == reports.front().system.cityDigest;
+        if (!sameCity)
+            html << "<p class=\"warn\">These reports are of <strong>different cities</strong> -- "
+                    "the city digests do not match. The numbers below are not comparable.</p>\n";
+
+        html << "<h2>Simulation</h2>\n<table><thead><tr><th>agents</th>";
+        for (const std::string& label : labels) html << "<th>" << Escape(label) << "</th>";
+        html << "<th>difference</th></tr></thead><tbody>";
+        for (const SimulationRow& base : reports.front().simulation)
+        {
+            html << "<tr><td>" << base.agents << "</td>";
+            std::vector<const SimulationRow*> row(reports.size(), nullptr);
+            for (std::size_t i = 0; i < reports.size(); ++i)
+                for (const SimulationRow& candidate : reports[i].simulation)
+                    if (candidate.agents == base.agents) row[i] = &candidate;
+            for (const SimulationRow* cell : row)
+                html << "<td>" << (cell != nullptr ? Number(cell->meanMs, 2) + " ms" : "&mdash;")
+                     << "</td>";
+
+            // Against the spread of both runs, not against zero. A difference smaller than the
+            // noise either run measured in itself is not a difference.
+            const SimulationRow* last = row.back();
+            if (row.front() != nullptr && last != nullptr && row.front()->meanMs > 0.0)
+            {
+                const double delta = last->meanMs - row.front()->meanMs;
+                const double noise = std::max(row.front()->spreadMs, last->spreadMs);
+                const double percent = delta / row.front()->meanMs * 100.0;
+                const char* cls = std::abs(delta) <= noise ? "noise"
+                                  : delta > 0.0            ? "worse"
+                                                           : "better";
+                html << "<td class=\"" << cls << "\">" << (delta >= 0.0 ? "+" : "")
+                     << Number(percent, 1) << "%"
+                     << (std::abs(delta) <= noise ? " (within noise)" : "") << "</td>";
+            }
+            else
+                html << "<td>&mdash;</td>";
+            html << "</tr>";
+        }
+        html << "</tbody></table>\n";
+
+        if (!reports.front().rendering.empty())
+        {
+            html << "<h2>Rendering</h2>\n<table><thead><tr><th>view</th>";
+            for (const std::string& label : labels) html << "<th>" << Escape(label) << "</th>";
+            html << "</tr></thead><tbody>";
+            for (const RenderingRow& base : reports.front().rendering)
+            {
+                html << "<tr><td>" << Escape(base.view) << "</td>";
+                for (const Report& report : reports)
+                {
+                    const RenderingRow* found = nullptr;
+                    for (const RenderingRow& candidate : report.rendering)
+                        if (candidate.view == base.view) found = &candidate;
+                    html << "<td>"
+                         << (found != nullptr ? Number(found->frameMs, 1) + " ms" : "&mdash;")
+                         << "</td>";
+                }
+                html << "</tr>";
+            }
+            html << "</tbody></table>\n";
+        }
+
+        html << "<footer>Written by <code>cna-city --compare</code>.</footer>\n</main>\n</body>\n"
+                "</html>\n";
+        return WriteFile(std::filesystem::path(path), html.str(), error);
     }
 
     bool WriteReport(const std::string& directory, const Report& report, std::string& error)

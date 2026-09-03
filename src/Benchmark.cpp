@@ -4,6 +4,8 @@
 #include "Checksum.hpp"
 #include "Replay.hpp"
 #include "CityGame.hpp"
+#include <filesystem>
+
 #include "Report.hpp"
 #include "Snapshot.hpp"
 
@@ -443,6 +445,43 @@ namespace CnaCity
             return 2;
         }
         std::printf("\nwrote %s/report.html and four CSVs\n", options.reportPath.c_str());
+        return 0;
+    }
+
+    int RunCompare(const CliOptions& options)
+    {
+        std::vector<Report> reports;
+        std::vector<std::string> labels;
+        for (const std::string& directory : options.comparePaths)
+        {
+            Report report;
+            std::string error;
+            if (!ReadReport(directory, report, error))
+            {
+                std::fprintf(stderr, "cna-city: %s\n", error.c_str());
+                return 2;
+            }
+            // The label is the directory's own name, which is what somebody comparing "before" and
+            // "after" or "opengles3" and "vulkan" has already encoded in the path.
+            std::filesystem::path path(directory);
+            if (path.filename().empty()) path = path.parent_path();
+            labels.push_back(path.filename().string());
+            reports.push_back(std::move(report));
+        }
+
+        std::string error;
+        if (!WriteComparison(options.comparisonPath, labels, reports, error))
+        {
+            std::fprintf(stderr, "cna-city: %s\n", error.c_str());
+            return 2;
+        }
+
+        std::printf("cna-city comparison -- %zu reports\n", reports.size());
+        for (std::size_t i = 0; i < reports.size(); ++i)
+            std::printf("  %-16s %s, %zu populations, %zu viewpoints\n", labels[i].c_str(),
+                        reports[i].system.renderer.c_str(), reports[i].simulation.size(),
+                        reports[i].rendering.size());
+        std::printf("\nwrote %s\n", options.comparisonPath.c_str());
         return 0;
     }
 
