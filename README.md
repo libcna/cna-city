@@ -71,6 +71,29 @@ Three things it deliberately does **not** use, and why — all three are in
   scattering against the empty sky and returns a band of red and green above every roofline. It is
   a switch that turns on an artefact (A8).
 
+## Overlapping the simulation with the draw
+
+```sh
+./build/cna-city --frame-model pipelined     # serial is the default
+```
+
+The simulation and the draw run one after the other. `--frame-model pipelined` starts the step
+after the instances have been collected — which is the last thing in the frame that reads the
+simulation — and joins it before the overlay and the HUD, which read it again. No snapshot: the
+ordering makes one unnecessary, and a snapshot of a hundred thousand citizens would cost more than
+it saved.
+
+It reports the **blocked** time: how much of the step the draw failed to cover. That is the number
+that answers the question, and it is far less sensitive to what else the machine is doing than a
+frame time is. On a quiet machine it is **0.01–0.3 ms against a step of 3–5 ms** — the draw covers
+essentially the whole simulation. Under load it rises to 8–10 ms, because the simulation already
+uses every core through its own pool and the two halves then compete rather than overlap.
+
+What that is worth in frames per second, this machine could not say: three runs of the *identical*
+serial configuration measured 13.0, 37.7 and 40.1 ms for the same viewpoint, which is three times
+the difference being looked for. The experiment is built and instrumented; the measurement wants a
+quiet machine. See [`plan.md`](plan.md) P19.
+
 ## Camera modes
 
 | Key | Mode |

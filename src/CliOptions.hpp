@@ -21,6 +21,22 @@ namespace CnaCity
         Compare        ///< Read several report directories and write one page comparing them.
     };
 
+    /**
+     * @brief Whether the simulation and the draw overlap.
+     *
+     * An experiment rather than a setting somebody should have to think about. The architecture
+     * runs them one after the other, and "would pipelining help" is a question worth an answer
+     * rather than an assumption -- the simulation already uses every core through its own pool, so
+     * running it beside the draw may buy the whole of it or none of it.
+     */
+    enum class FrameModel
+    {
+        Serial = 0,   ///< Step, then draw. What the program has always done.
+        Pipelined     ///< Collect the instances, start the step, draw it, join at the end.
+    };
+
+    [[nodiscard]] const char* FrameModelName(FrameModel model);
+
     /** @brief Visual quality, which is a bundle of pipeline settings rather than one dial. */
     enum class Quality
     {
@@ -37,6 +53,7 @@ namespace CnaCity
         SimConfig sim;
         RunMode mode = RunMode::Interactive;
         Quality quality = Quality::High;
+        FrameModel frameModel = FrameModel::Serial;
         CameraMode camera = CameraMode::Orbit;
         int overlay = 1;   ///< Index into Overlay: 0 none, 1 statistics, 2 road network, 3 routes.
         /// Index into Heatmap: 0 off, 1 traffic, 2 density, 3 render cost, 4 path planning.

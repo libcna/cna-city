@@ -10,6 +10,7 @@
 #include "CliOptions.hpp"
 #include "InstanceRenderer.hpp"
 #include "Materials.hpp"
+#include "FrameWorker.hpp"
 #include "Replay.hpp"
 #include "Report.hpp"
 #include "Simulation.hpp"
@@ -174,6 +175,12 @@ namespace CnaCity
         double prepassMs_ = 0.0;
         double instanceMs_ = 0.0;
         double smoothedFrameMs_ = 16.0;
+        /// The pipelined frame model: one worker, the step waiting to be started, and how long the
+        /// launch and the join actually took. See CityGame::Draw.
+        FrameWorker worker_;
+        float pendingStepSeconds_ = 0.0f;
+        double simLaunchMs_ = 0.0;
+        double simJoinMs_ = 0.0;
         int drawCalls_ = 0;
         int visibleTriangles_ = 0;
         std::size_t drawnPeople_ = 0;

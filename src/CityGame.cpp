@@ -1075,8 +1075,20 @@ namespace CnaCity
             // internally. Feeding it the whole interval rather than a fixed tick keeps the clock
             // honest when the frame rate drops -- the city does not slow down because the renderer
             // did.
-            sim_.Step(clamped * sim_.clock().timeScale());
-            recorder_.MaybeCheckpoint(sim_, options_.checkpointInterval);
+            // In the pipelined model the step is started inside Draw instead, once the instances
+            // have been collected from the settled state -- see CityGame::Draw. Everything Update
+            // does above reads the simulation (the follow camera most of all), so it has to run
+            // against a world that is not being changed underneath it, which it is: the previous
+            // frame's step was joined before this frame began.
+            if (options_.frameModel == FrameModel::Serial)
+            {
+                sim_.Step(clamped * sim_.clock().timeScale());
+                recorder_.MaybeCheckpoint(sim_, options_.checkpointInterval);
+            }
+            else
+            {
+                pendingStepSeconds_ = clamped * sim_.clock().timeScale();
+            }
         }
         watch.Stop();
         simMs_ = ElapsedMs(watch);
@@ -1823,18 +1835,49 @@ namespace CnaCity
                          std::max(1.0f, static_cast<float>(device.getViewportProperty().getHeightProperty()));
         UpdateLighting();
         CollectVisible();
+
+        // The pipelined model, and the whole of it.
+        //
+        // CollectVisible is the last thing in the frame that reads the simulation: everything
+        // after it draws from the instance buffers it just filled and from the static city, which
+        // has not changed since start-up. So the step can run beside all of that, on one worker
+        // thread, and be joined before the overlay and the HUD -- which read the simulation again
+        // -- put it back.
+        //
+        // No snapshot of the *agents*, and that is the point of putting the launch here rather
+        // than in Update: a snapshot of a hundred thousand citizens would cost more than it saved,
+        // and the ordering makes one unnecessary. What it costs instead is a frame of latency --
+        // the picture is the world as it was when the frame started, which it already was.
+        //
+        // The four scalars below are the exception, and they are copied rather than read where
+        // they were needed. The clock and the weather *are* written by the step, and the draw
+        // reads them after this point for the night level, the wetness, the snow and the clear
+        // colour. Four unsynchronised floats is a small race and a real one, and the fix is to
+        // take them while the world is still standing still.
+        const float night = sim_.clock().StreetLightLevel();
+        const float wetness = sim_.weather().wetness();
+        const float snowCover = sim_.weather().snowCover();
+        const float day = sim_.clock().Daylight();
+
+        if (options_.frameModel == FrameModel::Pipelined && pendingStepSeconds_ > 0.0f)
+        {
+            const float seconds = pendingStepSeconds_;
+            pendingStepSeconds_ = 0.0f;
+            System::Diagnostics::Stopwatch simWatch;
+            simWatch.Start();
+            worker_.Run([this, seconds] { sim_.Step(seconds); });
+            simLaunchMs_ = ElapsedMs(simWatch);
+        }
+
         DrawShadowCascades();
         DrawDepthNormalPrepass();
 
         const Matrix view = camera_.View();
         const Matrix projection = camera_.Projection();
-        const float night = sim_.clock().StreetLightLevel();
-        const float wetness = sim_.weather().wetness();
-
         // The clear colour matters only for the frame's first instant -- the sky covers it -- but
         // it is what the viewer sees if the sky is unavailable on this renderer, so it tracks the
-        // time of day rather than being a constant.
-        const float day = sim_.clock().Daylight();
+        // time of day rather than being a constant. `day`, `night`, `wetness` and `snowCover` were
+        // taken above, before the step was started.
         const Color clearColor = RgbaColor(static_cast<std::uint8_t>(12 + 118 * day),
                                            static_cast<std::uint8_t>(14 + 140 * day),
                                            static_cast<std::uint8_t>(22 + 170 * day));
@@ -1874,9 +1917,24 @@ namespace CnaCity
 
         watch.Restart();
         drawCalls_ += instances_.Flush(device, *effect_, materials_, view, projection, night, wetness,
-                                       sim_.weather().snowCover());
+                                       snowCover);
         watch.Stop();
         instanceMs_ = ElapsedMs(watch);
+
+        // Back in step before anything reads the simulation again. The wait is measured, because
+        // the difference between the two models is exactly how much of it there is: a wait of zero
+        // means the draw covered the step, and a wait of most of the step means the two are
+        // competing for the same cores rather than overlapping on them.
+        if (options_.frameModel == FrameModel::Pipelined)
+        {
+            System::Diagnostics::Stopwatch joinWatch;
+            joinWatch.Start();
+            worker_.Wait();
+            joinWatch.Stop();
+            simJoinMs_ = ElapsedMs(joinWatch);
+            simMs_ = simLaunchMs_ + simJoinMs_;
+            recorder_.MaybeCheckpoint(sim_, options_.checkpointInterval);
+        }
 
         DrawOverlay();
 
@@ -2005,7 +2063,10 @@ namespace CnaCity
         add("CAMERA %s AT %.0f %.0f %.0f   TIME x%.0f%s", CameraModeName(cameraMode_),
             camera_.position.X, camera_.position.Y, camera_.position.Z,
             static_cast<double>(sim_.clock().timeScale()), paused_ ? "  PAUSED" : "");
-        add("QUALITY %s  %s", QualityName(options_.quality), rendererName_.c_str());
+        add("QUALITY %s  %s  FRAME %s", QualityName(options_.quality), rendererName_.c_str(),
+            FrameModelName(options_.frameModel));
+        if (options_.frameModel == FrameModel::Pipelined)
+            add("  STEP LAUNCH %.2f MS  JOIN %.2f MS", simLaunchMs_, simJoinMs_);
         if (heatmap_ != Heatmap::None)
         {
             // The scale, always. A heatmap without one is a picture of where the red is, and the

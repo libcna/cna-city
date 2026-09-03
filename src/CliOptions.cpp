@@ -49,6 +49,11 @@ namespace CnaCity
         }
     }
 
+    const char* FrameModelName(FrameModel model)
+    {
+        return model == FrameModel::Pipelined ? "pipelined" : "serial";
+    }
+
     const char* QualityName(Quality quality)
     {
         switch (quality)
@@ -92,6 +97,7 @@ namespace CnaCity
             "  --no-post             Start with the post chain bypassed (what F2 toggles)\n"
             "  --overlay M           none, stats (default), roads, routes\n"
             "  --heatmap M           off (default), traffic, density, render, paths (also F4)\n"
+            "  --frame-model M       serial (default) or pipelined: overlap the step with the draw\n"
             "\n"
             "Measurement\n"
             "  --bench               Run the scale sweep and exit\n"
@@ -275,6 +281,14 @@ namespace CnaCity
                 else if (mode == "street") options.camera = CameraMode::Street;
                 else if (mode == "cinematic") options.camera = CameraMode::Cinematic;
                 else { options.error = "--camera: expected free, orbit, follow, street or cinematic"; return false; }
+            }
+            else if (arg == "--frame-model")
+            {
+                if (!next(value)) { options.error = "--frame-model needs a name"; return false; }
+                const std::string name = value;
+                if (name == "serial") options.frameModel = FrameModel::Serial;
+                else if (name == "pipelined") options.frameModel = FrameModel::Pipelined;
+                else { options.error = "--frame-model: expected serial or pipelined"; return false; }
             }
             else if (arg == "--heatmap")
             {

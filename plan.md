@@ -553,3 +553,49 @@ the only line in the table growing faster than the travellers do.
 At a million the simulation alone is 48 ms, so the demo is simulation-bound at about twenty ticks a
 second before a frame is drawn. Nothing prevents it running; it is simply no longer a real-time
 program at that size, which is a useful thing for a benchmark to be able to say precisely.
+
+---
+
+## P19 — Does overlapping the step with the draw help? Measure it, do not assume it
+
+The architecture runs the simulation and the draw one after the other, and has always said so. The
+question is whether overlapping them is worth the complexity -- asked as an experiment with a
+switch, rather than answered by implementing threading because threading sounds good.
+
+- [x] **P19.1 `--frame-model serial|pipelined`.** Serial is the default and is unchanged.
+
+- [x] **P19.2 No snapshot, because the ordering makes one unnecessary.** `CollectVisible` is the
+  last thing in the frame that reads the simulation; everything after it draws from the instance
+  buffers it just filled and from the static city, which has not changed since start-up. So the
+  step is started *after* the collect and joined before the overlay and the HUD, which read the
+  simulation again. A snapshot of a hundred thousand citizens would have cost more than it saved.
+
+  Four floats are the exception and are copied rather than shared: the night level, the wetness,
+  the snow cover and the daylight, which the draw reads after the launch and the step writes. Four
+  unsynchronised floats is a small race and a real one.
+
+- [x] **P19.3 Instrument the thing that answers the question.** The pipelined model reports the
+  *blocked* time -- how much of the step the draw failed to cover. That number is what says whether
+  an overlap happened, and it is far less sensitive to what else the machine is doing than a frame
+  time is, because it compares two things inside the same frame.
+
+### What it measured, and what it could not
+
+The overlap is real and available. In the least contended runs the blocked time is **0.01 to
+0.3 ms against a step of 3 to 5 ms** -- the draw covers essentially the whole simulation, and the
+step leaves the critical path completely. Under load it rises to 8-10 ms: the two halves are then
+competing for the same cores rather than overlapping on them, because the simulation already uses
+every core through its own pool.
+
+What this machine could not answer is what that is worth in frames per second. Three interleaved
+pairs of runs gave gains of +61%, -11%, -19% and -20% by viewpoint, while three runs of the
+*identical* serial configuration gave 13.0, 37.7 and 40.1 ms for the same viewpoint. The
+within-mode spread is three times the between-mode difference. The honest answer is that the
+experiment is built and instrumented and the measurement wants a quiet machine.
+
+**One thing it did establish, which was not the question.** In the serial model the simulation cost
+per frame is self-reinforcing: the simulated interval is the real frame time times the time scale,
+so a slow frame simulates more, which makes it slower. The measured step ranges from 3 ms to 21 ms
+across runs of an identical workload for that reason alone. Pipelining breaks the loop, and that
+may matter more than the overlap does -- a frame-rate floor that holds up under load is worth more
+than a few per cent at the top.
