@@ -2,6 +2,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <exception>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -31,9 +32,23 @@ namespace CnaCity
                           if (quit_ && !busy_) return;
                           job = std::move(job_);
                       }
-                      if (job) job();
+                      // Caught rather than allowed to leave the thread. An exception escaping a
+                      // std::thread's entry point is std::terminate, so the pipelined model would
+                      // turn a simulation error that the serial model reports into an abrupt death
+                      // with no message -- and the one place a benchmark must not differ from the
+                      // program it is benchmarking is in what happens when something goes wrong.
+                      std::exception_ptr failure;
+                      try
+                      {
+                          if (job) job();
+                      }
+                      catch (...)
+                      {
+                          failure = std::current_exception();
+                      }
                       {
                           std::lock_guard<std::mutex> lock(mutex_);
+                          failure_ = failure;
                           busy_ = false;
                       }
                       done_.notify_all();
@@ -44,7 +59,9 @@ namespace CnaCity
 
         ~FrameWorker()
         {
-            Wait();
+            // Swallowed here and only here: a destructor may not throw, and a job that failed
+            // while nobody was waiting has nowhere to report to.
+            try { Wait(); } catch (...) {}
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 quit_ = true;
@@ -68,11 +85,23 @@ namespace CnaCity
             ready_.notify_one();
         }
 
-        /** @brief Blocks until the running job finishes. Cheap and safe when nothing is running. */
+        /**
+         * @brief Blocks until the running job finishes, and rethrows what it threw.
+         *
+         * The rethrow is what makes the two frame models behave the same: a `Simulation::Step`
+         * that throws surfaces at the join here, on the thread that started it, exactly as it
+         * would have surfaced from the call in the serial model.
+         */
         void Wait()
         {
-            std::unique_lock<std::mutex> lock(mutex_);
-            done_.wait(lock, [this] { return !busy_; });
+            std::exception_ptr failure;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                done_.wait(lock, [this] { return !busy_; });
+                failure = failure_;
+                failure_ = nullptr;
+            }
+            if (failure) std::rethrow_exception(failure);
         }
 
     private:
@@ -80,6 +109,7 @@ namespace CnaCity
         std::condition_variable ready_;
         std::condition_variable done_;
         std::function<void()> job_;
+        std::exception_ptr failure_;
         bool busy_ = false;
         bool quit_ = false;
         std::thread thread_;

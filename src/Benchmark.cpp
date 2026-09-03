@@ -376,6 +376,7 @@ namespace CnaCity
         Report report;
         report.system = DescribeSystem();
         report.system.seed = options.sim.city.seed;
+        report.system.frameModel = FrameModelName(options.frameModel);
 
         std::vector<std::uint32_t> scales = options.benchScales;
         if (scales.empty()) scales = {1000u, 10000u, 50000u, options.sim.agentCount};

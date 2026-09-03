@@ -83,9 +83,24 @@ simulation — and joins it before the overlay and the HUD, which read it again.
 ordering makes one unnecessary, and a snapshot of a hundred thousand citizens would cost more than
 it saved.
 
-It reports the **blocked** time: how much of the step the draw failed to cover. That is the number
-that answers the question, and it is far less sensitive to what else the machine is doing than a
-frame time is. On a quiet machine it is **0.01–0.3 ms against a step of 3–5 ms** — the draw covers
+It reports the step three ways, because in this model one number cannot mean both things:
+
+```
+STEP 13.0 BLOCKED 0.0   DRAW 24.4        <- pipelined
+  STEP HIDDEN 12.97 MS  OVERLAP 100.0%
+
+STEP 9.1 BLOCKED 9.1    DRAW 16.5        <- serial
+```
+
+**Step** is what `Simulation::Step` actually cost. **Blocked** is how much of it the frame had to
+wait for — all of it in the serial model, and only the uncovered part in the pipelined one.
+**Hidden** and **overlap** are the difference. Reporting only the blocked figure, under the name
+"SIM", made a 13 ms step read as no simulation at all; and it hid the other half of the story,
+which is that the pipelined draw itself goes from 16.5 ms to 24.4 because the two halves are
+competing for the cores the simulation's own pool already uses.
+
+The blocked figure is also the one that survives a noisy machine, because it compares two things
+inside the same frame. On a quiet machine it is **0.01–0.3 ms against a step of 3–5 ms** — the draw covers
 essentially the whole simulation. Under load it rises to 8–10 ms, because the simulation already
 uses every core through its own pool and the two halves then compete rather than overlap.
 
@@ -139,7 +154,7 @@ cmake --build build -j$(nproc)
 ctest --test-dir build --output-on-failure
 ```
 
-Seventy-one cases across twelve suites, weighted towards regression rather than coverage. That is
+A hundred and two cases across seventeen suites, weighted towards regression rather than coverage. That is
 deliberate: this program is a benchmark, and **a simulation that quietly stops moving anybody gets
 faster.** Every defect recorded in [`ARCHITECTURE.md`](ARCHITECTURE.md) did exactly that, and three
 of them looked like tuning. The tests are named for the defect rather than for the function —
@@ -399,7 +414,7 @@ the shadow cascades put the renderer ahead, and at street level the simulation i
 two even with almost nothing on screen. The whole static city is 246 000 triangles.
 
 What CNA could not do here is written down as plainly as what it could, in
-[`CNA-FINDINGS.md`](CNA-FINDINGS.md) — seven capability gaps, each checked against CNA's own
+[`CNA-FINDINGS.md`](CNA-FINDINGS.md) — eight capability gaps, each checked against CNA's own
 source before it was written down, and four things that looked like engine defects and turned
 out to be this program's mistakes. Every defect found on the way — including the four that
 produced a city where nobody ever arrived anywhere, the one that made every road invisible, and

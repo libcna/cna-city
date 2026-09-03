@@ -193,6 +193,7 @@ if(CNA_CITY_BUILD_TESTS)
         tests/ReplayTests.cpp
         tests/SnapshotTests.cpp
         tests/ReportTests.cpp
+        tests/FrameWorkerTests.cpp
     )
     target_link_libraries(cna-city-tests PRIVATE cna-city-sim gtest gmock)
     if(NOT MSVC)

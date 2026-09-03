@@ -96,8 +96,32 @@ namespace CnaCity
         void CollectVisible();
         void DrawShadowCascades();
         void DrawDepthNormalPrepass();
-        void DrawStaticCity();
-        void DrawSkyOverlay();
+        /**
+         * @brief Everything the draw needs from the clock and the weather, copied once a frame.
+         *
+         * The pipelined model runs the simulation step beside the draw, and the step writes the
+         * clock and the weather. Reading them from the draw is a data race on five floats -- small,
+         * real, and undefined -- so they are taken while the world is still standing still and
+         * handed down as a value.
+         *
+         * It exists as a struct rather than five parameters because that is what stopped it being
+         * wrong twice: the first fix hoisted four of the five reads out of `Draw` itself and left
+         * the ones inside `DrawSkyOverlay` and `DrawStaticCity`, which a grep of `Draw`'s own body
+         * could not see. A type the compiler will not let those functions do without is a check
+         * that a comment is not.
+         */
+        struct FrameEnvironment
+        {
+            float daylight = 1.0f;
+            float night = 0.0f;
+            float cloudiness = 0.0f;
+            float wetness = 0.0f;
+            float snowCover = 0.0f;
+        };
+        [[nodiscard]] FrameEnvironment CaptureEnvironment() const;
+
+        void DrawStaticCity(const FrameEnvironment& environment);
+        void DrawSkyOverlay(const FrameEnvironment& environment);
         void DrawOverlay();
         void DrawHud();
         void SaveScreenshot();
@@ -169,7 +193,21 @@ namespace CnaCity
 
         // --- Frame statistics ------------------------------------------------------------------
         double frameMs_ = 0.0;
-        double simMs_ = 0.0;
+        /// What the simulation step cost, split three ways because in the pipelined model one
+        /// number cannot mean both things.
+        ///
+        /// `stepWallMs_` is how long `Simulation::Step` actually took. `stepBlockedMs_` is how
+        /// much of that the frame had to wait for -- the whole of it in the serial model, and only
+        /// the part the draw failed to cover in the pipelined one. The difference is what the
+        /// overlap bought, and reporting the blocked figure under the name "SIM" made a 4 ms step
+        /// read as 0.2 ms of simulation.
+        double stepWallMs_ = 0.0;
+        double stepBlockedMs_ = 0.0;
+        [[nodiscard]] double StepHiddenMs() const { return std::max(0.0, stepWallMs_ - stepBlockedMs_); }
+        [[nodiscard]] double StepOverlapPercent() const
+        {
+            return stepWallMs_ > 1e-6 ? 100.0 * StepHiddenMs() / stepWallMs_ : 0.0;
+        }
         double shadowMs_ = 0.0;
         double sceneMs_ = 0.0;
         double prepassMs_ = 0.0;

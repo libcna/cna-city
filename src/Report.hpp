@@ -33,6 +33,10 @@ namespace CnaCity
         std::uint64_t seed = 0;
         std::string cityDigest;    ///< So two reports can be told apart at a glance.
         std::string takenAt;       ///< Local time, ISO-ish. Provenance, not a measurement.
+        /// "serial" or "pipelined". In the metadata because two reports taken under different
+        /// frame models are not comparable, and a comparison that does not know which is which
+        /// will happily put them side by side.
+        std::string frameModel;
         /// One-minute load average where the platform has one, negative where it does not. A
         /// number measured on a busy machine is not wrong, it is just not about this program.
         double loadAverage = -1.0;
@@ -74,7 +78,13 @@ namespace CnaCity
         int height = 0;
         std::string quality;
         double frameMs = 0.0;
+        /// What the frame *waited* for the simulation: the whole step in the serial model, and
+        /// only the part the draw failed to cover in the pipelined one.
         double simulationMs = 0.0;
+        /// What the step actually cost, whether or not the frame waited for it. The two are the
+        /// same number in the serial model and are not in the pipelined one, and reporting only
+        /// the first made a four-millisecond step read as two tenths of simulation.
+        double stepWallMs = 0.0;
         double drawMs = 0.0;
         double shadowMs = 0.0;
         double prepassMs = 0.0;

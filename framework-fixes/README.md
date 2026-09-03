@@ -1,9 +1,9 @@
 # Framework fixes found by CNA City
 
-CNA City exists to bend CNA until something gives and then say precisely what gave. Nine such
-things are recorded in [`../CNA-FINDINGS.md`](../CNA-FINDINGS.md); this directory holds the ones
-that have a *fix* rather than only a diagnosis, as patches against `../../cnanext` and
-`../../sharp-runtimenext`.
+CNA City exists to bend CNA until something gives and then say precisely what gave. Eight such
+things are recorded in [`../CNA-FINDINGS.md`](../CNA-FINDINGS.md) as capability gaps, A1 to A8;
+this directory holds the ones that have a *fix* rather than only a diagnosis, as patches against
+`../../cnanext` and `../../sharp-runtimenext`.
 
 They are patches rather than commits in those repositories on purpose. Both are separate checkouts
 shared with other work — at the time of writing `cnanext` had uncommitted changes in
@@ -31,10 +31,10 @@ Each patch carries, in its own header:
 be careful with: the other two fill in a call that was missing, and that one changes how work is
 partitioned across threads. Its header says what to run before landing it.
 
-The five findings with no patch here — A1 (lights or a texture set, never both), A2 (no attribute
-slot for a per-instance colour), A4 (`AtmosphericSky` below the horizon), A5 (only transparency
-reports a fallback) — are engine design questions rather than defects with an obvious fix, and
-saying so is more useful than guessing at one.
+The four with no patch here — A1 (lights or a texture set, never both), A2 (no attribute slot for
+a per-instance colour), A4 (`AtmosphericSky` below the horizon), A5 (only transparency reports a
+fallback) — are engine design questions rather than defects with an obvious fix, and saying so is
+more useful than guessing at one. Three patches, one note, four left open: that is all eight.
 
 ## Applying one
 

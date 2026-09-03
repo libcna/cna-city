@@ -272,6 +272,7 @@ namespace CnaCity
         out.system.renderer = JsonField(system, "renderer");
         out.system.graphicsCard = JsonField(system, "graphicsCard");
         out.system.os = JsonField(system, "os");
+        out.system.frameModel = JsonField(system, "frameModel");
         out.system.compiler = JsonField(system, "compiler");
         out.system.buildType = JsonField(system, "buildType");
         out.system.cityDigest = JsonField(system, "cityDigest");
@@ -324,6 +325,7 @@ namespace CnaCity
             r.instanceMs = Cell(row, 10);
             r.drawCalls = static_cast<std::uint32_t>(Cell(row, 11));
             r.triangles = static_cast<std::uint32_t>(Cell(row, 12));
+            r.stepWallMs = Cell(row, 13);
             out.rendering.push_back(r);
         }
 
@@ -377,6 +379,17 @@ namespace CnaCity
         if (!sameCity)
             html << "<p class=\"warn\">These reports are of <strong>different cities</strong> -- "
                     "the city digests do not match. The numbers below are not comparable.</p>\n";
+
+        // A frame model is part of what a rendering number means, so a comparison across two of
+        // them is a comparison of two different programs unless that is the thing being compared.
+        // Saying so is the difference between an experiment and a mistake.
+        bool sameModel = true;
+        for (const Report& r : reports)
+            sameModel = sameModel && r.system.frameModel == reports.front().system.frameModel;
+        if (!sameModel)
+            html << "<p class=\"warn\">These reports used <strong>different frame models</strong>. "
+                    "That is a fair comparison only if the frame model is what is being compared; "
+                    "it is not a fair comparison of anything else.</p>\n";
 
         html << "<h2>Simulation</h2>\n<table><thead><tr><th>agents</th>";
         for (const std::string& label : labels) html << "<th>" << Escape(label) << "</th>";
@@ -460,6 +473,7 @@ namespace CnaCity
             json << "  \"buildType\": " << JsonString(report.system.buildType) << ",\n";
             json << "  \"compiler\": " << JsonString(report.system.compiler) << ",\n";
             json << "  \"os\": " << JsonString(report.system.os) << ",\n";
+            json << "  \"frameModel\": " << JsonString(report.system.frameModel) << ",\n";
             json << "  \"hardwareThreads\": " << report.system.hardwareThreads << ",\n";
             json << "  \"workerThreads\": " << report.system.workerThreads << ",\n";
             json << "  \"seed\": " << report.system.seed << ",\n";
@@ -507,13 +521,18 @@ namespace CnaCity
         {
             std::ostringstream csv;
             csv << "view,width,height,quality,frame_ms,simulation_ms,draw_ms,shadow_ms,"
-                   "prepass_ms,scene_ms,instance_ms,draw_calls,triangles\n";
+                   "prepass_ms,scene_ms,instance_ms,draw_calls,triangles,step_wall_ms,overlap\n";
             for (const RenderingRow& row : report.rendering)
                 csv << row.view << ',' << row.width << ',' << row.height << ',' << row.quality
                     << ',' << Number(row.frameMs) << ',' << Number(row.simulationMs) << ','
                     << Number(row.drawMs) << ',' << Number(row.shadowMs) << ','
                     << Number(row.prepassMs) << ',' << Number(row.sceneMs) << ','
                     << Number(row.instanceMs) << ',' << row.drawCalls << ',' << row.triangles
+                    << ',' << Number(row.stepWallMs) << ','
+                    << Number(row.stepWallMs > 1e-6
+                                  ? 100.0 * (row.stepWallMs - row.simulationMs) / row.stepWallMs
+                                  : 0.0,
+                              1)
                     << '\n';
             if (!WriteFile(root / "rendering.csv", csv.str(), error)) return false;
 
@@ -588,6 +607,7 @@ namespace CnaCity
             row("Renderer", report.system.renderer);
             row("Graphics", report.system.graphicsCard);
             row("Operating system", report.system.os);
+            row("Frame model", report.system.frameModel);
             row("Compiler", report.system.compiler);
             row("Build", report.system.buildType);
             row("Hardware threads", std::to_string(report.system.hardwareThreads));

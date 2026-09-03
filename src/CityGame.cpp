@@ -133,6 +133,7 @@ namespace CnaCity
                 row.prepassMs /= frames;
                 row.sceneMs /= frames;
                 row.instanceMs /= frames;
+                row.stepWallMs /= frames;
                 row.drawCalls = static_cast<std::uint32_t>(row.drawCalls / frames);
                 row.triangles = static_cast<std::uint32_t>(row.triangles / frames);
                 renderingRows_.push_back(row);
@@ -172,7 +173,8 @@ namespace CnaCity
         if (reportFrame_ >= warmUp)
         {
             reportAccum_.frameMs += smoothedFrameMs_;
-            reportAccum_.simulationMs += simMs_;
+            reportAccum_.simulationMs += stepBlockedMs_;
+            reportAccum_.stepWallMs += stepWallMs_;
             reportAccum_.drawMs += frameMs_;
             reportAccum_.shadowMs += shadowMs_;
             reportAccum_.prepassMs += prepassMs_;
@@ -1082,7 +1084,11 @@ namespace CnaCity
             // frame's step was joined before this frame began.
             if (options_.frameModel == FrameModel::Serial)
             {
+                System::Diagnostics::Stopwatch stepWatch;
+                stepWatch.Start();
                 sim_.Step(clamped * sim_.clock().timeScale());
+                stepWatch.Stop();
+                stepWallMs_ = ElapsedMs(stepWatch);
                 recorder_.MaybeCheckpoint(sim_, options_.checkpointInterval);
             }
             else
@@ -1091,7 +1097,9 @@ namespace CnaCity
             }
         }
         watch.Stop();
-        simMs_ = ElapsedMs(watch);
+        // In the serial model the whole step is on the critical path, so the frame waited for all
+        // of it. The pipelined model overwrites this at the join with what it actually waited for.
+        if (options_.frameModel == FrameModel::Serial) stepBlockedMs_ = ElapsedMs(watch);
 
         // The camera moves *after* the world does. The other order costs one step of lag, which
         // for a free camera is invisible and for the follow camera is not: at sixty times real
@@ -1436,14 +1444,25 @@ namespace CnaCity
         prepassMs_ = ElapsedMs(watch);
     }
 
-    void CityGame::DrawStaticCity()
+    CityGame::FrameEnvironment CityGame::CaptureEnvironment() const
+    {
+        FrameEnvironment environment;
+        environment.daylight = sim_.clock().Daylight();
+        environment.night = sim_.clock().StreetLightLevel();
+        environment.cloudiness = sim_.weather().cloudiness();
+        environment.wetness = sim_.weather().wetness();
+        environment.snowCover = sim_.weather().snowCover();
+        return environment;
+    }
+
+    void CityGame::DrawStaticCity(const FrameEnvironment& environment)
     {
         GraphicsDevice& device = getGraphicsDeviceProperty();
         const Matrix view = camera_.View();
         const Matrix projection = camera_.Projection();
-        const float night = sim_.clock().StreetLightLevel();
-        const float wetness = sim_.weather().wetness();
-        const float snow = sim_.weather().snowCover();
+        const float night = environment.night;
+        const float wetness = environment.wetness;
+        const float snow = environment.snowCover;
 
         effect_->setWorldProperty(Matrix::getIdentityProperty());
         effect_->setViewProperty(view);
@@ -1496,7 +1515,7 @@ namespace CnaCity
         device.setRasterizerStateProperty(RasterizerState::CullCounterClockwise);
     }
 
-    void CityGame::DrawSkyOverlay()
+    void CityGame::DrawSkyOverlay(const FrameEnvironment& environment)
     {
         // Cloud cover and night, as one blended sheet over the analytic sky.
         //
@@ -1507,8 +1526,8 @@ namespace CnaCity
         // deep blue whose weight is how far past sunset it is. On a clear day both weights are
         // zero and the sky is exactly what the model produced.
         if (batch_ == nullptr || text_.WhitePixel() == nullptr) return;
-        const float day = sim_.clock().Daylight();
-        const float cloud = sim_.weather().cloudiness();
+        const float day = environment.daylight;
+        const float cloud = environment.cloudiness;
         const float cloudWeight = cloud * 0.88f;
         // Fully opaque once the analytic sky has stopped being drawn, because at that point there
         // is nothing underneath it but the clear colour.
@@ -1854,10 +1873,11 @@ namespace CnaCity
         // reads them after this point for the night level, the wetness, the snow and the clear
         // colour. Four unsynchronised floats is a small race and a real one, and the fix is to
         // take them while the world is still standing still.
-        const float night = sim_.clock().StreetLightLevel();
-        const float wetness = sim_.weather().wetness();
-        const float snowCover = sim_.weather().snowCover();
-        const float day = sim_.clock().Daylight();
+        const FrameEnvironment environment = CaptureEnvironment();
+        const float night = environment.night;
+        const float wetness = environment.wetness;
+        const float snowCover = environment.snowCover;
+        const float day = environment.daylight;
 
         if (options_.frameModel == FrameModel::Pipelined && pendingStepSeconds_ > 0.0f)
         {
@@ -1865,7 +1885,16 @@ namespace CnaCity
             pendingStepSeconds_ = 0.0f;
             System::Diagnostics::Stopwatch simWatch;
             simWatch.Start();
-            worker_.Run([this, seconds] { sim_.Step(seconds); });
+            // The step times itself, because the frame cannot: the whole point of running it over
+            // there is that this thread is not watching. The write is safe to read after the join,
+            // which synchronises with it.
+            worker_.Run([this, seconds] {
+                System::Diagnostics::Stopwatch stepWatch;
+                stepWatch.Start();
+                sim_.Step(seconds);
+                stepWatch.Stop();
+                stepWallMs_ = ElapsedMs(stepWatch);
+            });
             simLaunchMs_ = ElapsedMs(simWatch);
         }
 
@@ -1909,9 +1938,9 @@ namespace CnaCity
             device.setDepthStencilStateProperty(DepthStencilState::Default);
             ++drawCalls_;
         }
-        DrawSkyOverlay();
+        DrawSkyOverlay(environment);
 
-        DrawStaticCity();
+        DrawStaticCity(environment);
         watch.Stop();
         sceneMs_ = ElapsedMs(watch);
 
@@ -1932,7 +1961,7 @@ namespace CnaCity
             worker_.Wait();
             joinWatch.Stop();
             simJoinMs_ = ElapsedMs(joinWatch);
-            simMs_ = simLaunchMs_ + simJoinMs_;
+            stepBlockedMs_ = simLaunchMs_ + simJoinMs_;
             recorder_.MaybeCheckpoint(sim_, options_.checkpointInterval);
         }
 
@@ -2042,8 +2071,8 @@ namespace CnaCity
         add("");
         add("FRAME %.1f MS (%.0f FPS)", smoothedFrameMs_,
             smoothedFrameMs_ > 0.01 ? 1000.0 / smoothedFrameMs_ : 0.0);
-        add("  SIM %.1f  DRAW %.1f  (SHADOW %.1f PREPASS %.1f SCENE %.1f INST %.1f)", simMs_,
-            frameMs_, shadowMs_, prepassMs_, sceneMs_, instanceMs_);
+        add("  STEP %.1f BLOCKED %.1f  DRAW %.1f  (SHADOW %.1f PREPASS %.1f SCENE %.1f INST %.1f)",
+            stepWallMs_, stepBlockedMs_, frameMs_, shadowMs_, prepassMs_, sceneMs_, instanceMs_);
         add("  SIM SPLIT  DECIDE %.1f WALK %.1f CROWD %.1f TRAFFIC %.1f METRO %.1f BUS %.1f x%d",
             stats.decisionMs, stats.walkMs, stats.crowdMs, stats.trafficMs, stats.metroMs,
             stats.busMs, stats.subSteps);
@@ -2066,7 +2095,8 @@ namespace CnaCity
         add("QUALITY %s  %s  FRAME %s", QualityName(options_.quality), rendererName_.c_str(),
             FrameModelName(options_.frameModel));
         if (options_.frameModel == FrameModel::Pipelined)
-            add("  STEP LAUNCH %.2f MS  JOIN %.2f MS", simLaunchMs_, simJoinMs_);
+            add("  STEP HIDDEN %.2f MS  OVERLAP %.1f%%  (LAUNCH %.2f JOIN %.2f)", StepHiddenMs(),
+                StepOverlapPercent(), simLaunchMs_, simJoinMs_);
         if (heatmap_ != Heatmap::None)
         {
             // The scale, always. A heatmap without one is a picture of where the red is, and the

@@ -175,7 +175,9 @@ like tuning rather than like breakage.
 - [x] **P11.1 A test target.** GoogleTest, reused from `../cnanext/vendor/googletest` rather than
   fetched a second time. The simulation half of the program becomes a library (`cna-city-sim`) so
   the tests can link the city without linking a renderer — the same split `--headless` already
-  draws. *Accept:* `ctest` runs, and 71 cases across twelve suites pass.
+  draws. *Accept:* `ctest` runs, and 71 cases across twelve suites pass. (That was the count P11
+  delivered; the suite is 102 cases across 17 suites as of P20, and every later section says what
+  it added.)
 
 - [x] **P11.2 Regression tests for every defect on record.** Named for the defect rather than for
   the function, because that is what they are for: `PedestriansActuallyArriveAtALargeTimeScale`,
@@ -609,3 +611,61 @@ so a slow frame simulates more, which makes it slower. The measured step ranges 
 across runs of an identical workload for that reason alone. Pipelining breaks the loop, and that
 may matter more than the overlap does -- a frame-rate floor that holds up under load is worth more
 than a few per cent at the top.
+
+---
+
+## P20 — Correctness hardening, from an outside audit
+
+Four defects, all found by somebody reading the code rather than running it, and all in work from
+P19 or in documentation that had drifted behind it.
+
+- [x] **P20.1 The pipelined model still had a data race, and my check for it was blind.** The fix
+  in P19 hoisted four reads of the clock and the weather out of `Draw`'s own body. `DrawSkyOverlay`
+  and `DrawStaticCity` are called between the launch and the join and read five more --
+  `Daylight`, `StreetLightLevel`, `cloudiness`, `wetness`, `snowCover` -- and `cloudiness` was not
+  among the four. The grep that reported "none" only looked at the lines of `Draw` itself.
+
+  Fixed with a `FrameEnvironment` captured before the launch and passed down. A struct rather than
+  five parameters, and rather than another comment: a type those functions cannot do without is a
+  check that survives the next person, which a comment saying "nothing here reads the simulation"
+  demonstrably did not.
+
+- [x] **P20.2 `simMs_` meant two different things.** In the serial model it was the step; in the
+  pipelined one it was launch plus join -- the part of the step the draw failed to cover. Both are
+  worth having and neither should be called "SIM": a 13 ms step read as 0.0. Split into
+  `STEP` (wall), `BLOCKED`, `HIDDEN` and `OVERLAP %`, with the wall measured inside the job because
+  the frame cannot see it. `rendering.csv` carries both, and the frame model is now in
+  `system.json` -- with `--compare` refusing to put two models side by side without saying so.
+
+- [x] **P20.3 `FrameWorker` could not report a failure.** An exception leaving a `std::thread`'s
+  entry point is `std::terminate`, so a step that threw would kill the pipelined build outright
+  where the serial one reports it. The worker keeps an `exception_ptr` and `Wait` rethrows it, so
+  both models fail the same way. Six tests, including that a failure does not poison the next job
+  and that the destructor does not throw when nobody was waiting.
+
+- [x] **P20.4 The documentation had drifted.** README claimed 71 cases across twelve suites (102
+  across 17) and seven capability gaps (eight, A1 to A8); `framework-fixes/README.md` said nine
+  findings and "the five with no patch" while listing four. All re-derived from the source rather
+  than edited by hand: three patches, one note, four left open, which is all eight.
+
+## What comes next, and what deliberately does not
+
+Agreed after the audit, in order:
+
+1. **A soak test.** Several simulated days, asserting that nothing accumulates: no growing count of
+   routes nobody is following, no route slots leaked, no passengers waiting forever, no memory
+   growth, no permanent gridlock, and a population that actually goes home in the evening. Failures
+   that only appear after hours of simulated time are exactly what a benchmark should be able to
+   find and what nothing here currently looks for.
+2. **Freeze and tag a baseline**, so future CNA versions are measured against a fixed point.
+3. **Wait for the current CNA work to land**, then run the renderer matrix that
+   `scripts/compare-renderers.sh` already exists for.
+4. **Validate the framework patches separately**, against whatever `next` is by then. A6 in
+   particular changes threading semantics and leaves the `ParallelLoopState` and `ForEach`
+   overloads untouched; it should not go in on this project's say-so.
+
+What is deliberately **not** next: schools, police, hospitals, an economy, trams added for the sake
+of trams, or ten million citizens for the sake of a bigger number. The million already answered the
+question worth asking, and answered it well -- the first thing to stop scaling was not a data
+structure but a constant scheduling policy. Another subsystem earns its place only by presenting
+CNA with a *kind* of load it has not seen.
