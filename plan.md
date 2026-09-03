@@ -581,17 +581,27 @@ switch, rather than answered by implementing threading because threading sounds 
 
 ### What it measured, and what it could not
 
-The overlap is real and available. In the least contended runs the blocked time is **0.01 to
-0.3 ms against a step of 3 to 5 ms** -- the draw covers essentially the whole simulation, and the
-step leaves the critical path completely. Under load it rises to 8-10 ms: the two halves are then
-competing for the same cores rather than overlapping on them, because the simulation already uses
-every core through its own pool.
+The overlap is real and available, and this is the part that measured cleanly. Across four separate
+runs the blocked time is **0.008 to 0.3 ms against a step of 3 to 5 ms** -- the draw covers
+essentially the whole simulation, and the step leaves the critical path completely. Under load it
+rises to 8-10 ms: the two halves are then competing for the same cores rather than overlapping on
+them, because the simulation already uses every core through its own pool.
+
+That the blocked figure held across four runs while the frame times did not is the reason to
+instrument it. It compares two things happening inside the same frame, so it survives conditions
+that make the frame time meaningless.
 
 What this machine could not answer is what that is worth in frames per second. Three interleaved
 pairs of runs gave gains of +61%, -11%, -19% and -20% by viewpoint, while three runs of the
 *identical* serial configuration gave 13.0, 37.7 and 40.1 ms for the same viewpoint. The
-within-mode spread is three times the between-mode difference. The honest answer is that the
-experiment is built and instrumented and the measurement wants a quiet machine.
+within-mode spread is three times the between-mode difference.
+
+Waiting for a quiet machine was tried and is not enough: a fifth pair, gated on the one-minute load
+average dropping below 2 before it started, still measured -117% on the city overview -- the load
+was 4.5 by the time it finished, and the pipelined run's *draw* had gone from 14.6 ms to 22.8 while
+its blocked time stayed at 0.18. The comparison needs a machine that is quiet for the whole of it,
+not one that is quiet when it starts. The honest answer is that the experiment is built and
+instrumented and the frame-rate question is still open.
 
 **One thing it did establish, which was not the question.** In the serial model the simulation cost
 per frame is self-reinforcing: the simulated interval is the real frame time times the time scale,

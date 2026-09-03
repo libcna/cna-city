@@ -91,8 +91,9 @@ uses every core through its own pool and the two halves then compete rather than
 
 What that is worth in frames per second, this machine could not say: three runs of the *identical*
 serial configuration measured 13.0, 37.7 and 40.1 ms for the same viewpoint, which is three times
-the difference being looked for. The experiment is built and instrumented; the measurement wants a
-quiet machine. See [`plan.md`](plan.md) P19.
+the difference being looked for. Waiting for the load average to fall before starting did not fix
+it — the machine simply became busy again mid-run. The experiment is built and instrumented and
+that question is still open. See [`plan.md`](plan.md) P19.
 
 ## Camera modes
 
