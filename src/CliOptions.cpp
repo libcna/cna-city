@@ -91,6 +91,7 @@ namespace CnaCity
             "  --follow-bus          Follow somebody using the buses\n"
             "  --no-post             Start with the post chain bypassed (what F2 toggles)\n"
             "  --overlay M           none, stats (default), roads, routes\n"
+            "  --heatmap M           off (default), traffic, density, render, paths (also F4)\n"
             "\n"
             "Measurement\n"
             "  --bench               Run the scale sweep and exit\n"
@@ -274,6 +275,21 @@ namespace CnaCity
                 else if (mode == "street") options.camera = CameraMode::Street;
                 else if (mode == "cinematic") options.camera = CameraMode::Cinematic;
                 else { options.error = "--camera: expected free, orbit, follow, street or cinematic"; return false; }
+            }
+            else if (arg == "--heatmap")
+            {
+                if (!next(value)) { options.error = "--heatmap needs a name"; return false; }
+                const std::string name = value;
+                if (name == "off" || name == "none") options.heatmap = 0;
+                else if (name == "traffic") options.heatmap = 1;
+                else if (name == "density") options.heatmap = 2;
+                else if (name == "render") options.heatmap = 3;
+                else if (name == "paths") options.heatmap = 4;
+                else
+                {
+                    options.error = "--heatmap: expected off, traffic, density, render or paths";
+                    return false;
+                }
             }
             else if (arg == "--overlay")
             {

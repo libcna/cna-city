@@ -67,11 +67,31 @@ namespace CnaCity
         [[nodiscard]] const Stats& stats() const { return stats_; }
 
         [[nodiscard]] std::size_t cacheBytes() const;
+        /** @brief The largest district heat right now, so an overlay can scale its colours. */
+        [[nodiscard]] float peakHeat() const { return peakHeat_; }
 
         /** @brief Empties the cache; used when the benchmark changes scale. */
         void ClearCache();
 
+        /**
+         * @brief Per district, how hard the planner has been working there lately.
+         *
+         * Incremented on a cache *miss* -- a hit costs nothing and says nothing about where the
+         * work is -- and decayed with @ref DecayHeat, so what it shows is recent rather than
+         * cumulative. A cumulative count over a simulated day is uniform by lunchtime and answers
+         * no question anybody has; the interesting one is "which part of the city is the planner
+         * struggling with *now*", and that is what an overlay can be pointed at.
+         */
+        [[nodiscard]] const std::vector<float>& heatByDistrict() const { return heat_; }
+
+        /** @brief Fades @ref heatByDistrict towards zero. Called once per simulated tick. */
+        void DecayHeat(float dt);
+
     private:
+        /// Per district; see heatByDistrict.
+        std::vector<float> heat_;
+        float peakHeat_ = 0.0f;
+
         struct CacheEntry
         {
             std::uint64_t key = 0;        ///< (start << 32) | goal; 0 means empty.

@@ -81,6 +81,24 @@ Three things it deliberately does **not** use, and why — all three are in
 | `4` | Street level — a fixed camera on a pavement corner, watching the city go past. |
 | `5` | Cinematic — a slow scripted sweep, for capture. |
 
+## Heatmaps
+
+`F4` cycles a layer that paints a *cost* over the city, on its own key rather than folded into
+`Tab`: an overlay shows what the simulation is, a heatmap shows what it is costing, and the two are
+worth looking at together. Also `--heatmap traffic|density|render|paths`, because a screenshot has
+no keyboard.
+
+| layer | what is red |
+|---|---|
+| **traffic** | Mean speed per road segment against *that road's own limit* — an arterial at 8 m/s is flowing and an alley at 8 m/s is not, so colouring by absolute speed paints the whole suburb red and says nothing. |
+| **density** | People and vehicles per 100 m cell. The cell size is what makes it readable: finer is speckle, coarser smears a queue at one junction across a district. |
+| **render** | Triangles per *visible* chunk. A culled chunk is not costing anything, so it is not drawn. |
+| **paths** | Route searches per district, on a ten-second half-life. It counts cache **misses**, because a hit costs nothing — and it decays, because a cumulative count is uniform by lunchtime and answers no question anybody has. |
+
+Every one of them puts its scale on the HUD. A heatmap without a legend is a picture of where the
+red is, and the same city looks alarming or fine depending on what the brightest cell happened to
+be.
+
 `Tab` cycles the overlay — off, statistics, the road graph the planner actually sees, and the live
 routes of the citizens near the camera (also `--overlay roads`). `N` picks another citizen to
 follow and **`L` locks the one you have**, so the camera waits outside their door instead of moving

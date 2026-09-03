@@ -84,6 +84,7 @@ namespace CnaCity
         cameraMode_ = options_.camera;
         overlay_ = static_cast<Overlay>(Clamp(options_.overlay, 0, static_cast<int>(Overlay::Count) - 1));
         postProcessing_ = !options_.noPost;
+        heatmap_ = static_cast<Heatmap>(Clamp(options_.heatmap, 0, static_cast<int>(Heatmap::Count) - 1));
     }
 
     CityGame::~CityGame()
@@ -488,6 +489,12 @@ namespace CnaCity
         if (pressed(Keys::P)) paused_ = !paused_;
         if (pressed(Keys::F1)) hudVisible_ = !hudVisible_;
         if (pressed(Keys::F2)) postProcessing_ = !postProcessing_;
+        // F4 cycles the heatmap, which is its own layer rather than another Tab stop: an overlay
+        // says what the simulation is and a heatmap says what it costs, and the two are worth
+        // looking at together.
+        if (pressed(Keys::F4))
+            heatmap_ = static_cast<Heatmap>((static_cast<int>(heatmap_) + 1) %
+                                            static_cast<int>(Heatmap::Count));
         if (pressed(Keys::F3) && pipeline_ != nullptr)
         {
             // GPU timing is off by default because it costs a query per pass and, on a driver
@@ -1521,8 +1528,190 @@ namespace CnaCity
         ++drawCalls_;
     }
 
+    const char* HeatmapName(Heatmap heatmap)
+    {
+        switch (heatmap)
+        {
+            case Heatmap::None:       return "off";
+            case Heatmap::Traffic:    return "traffic speed";
+            case Heatmap::Density:    return "density";
+            case Heatmap::RenderCost: return "render cost";
+            case Heatmap::PathCache:  return "path planning";
+            case Heatmap::Count:      break;
+        }
+        return "?";
+    }
+
+    namespace
+    {
+        /// Blue through green and yellow to red, for a value already normalised to 0..1.
+        ///
+        /// Not a rainbow and not a single hue ramp. A rainbow puts its brightest band in the
+        /// middle and makes a mid value look like the extreme; a single hue makes the difference
+        /// between "busy" and "stopped" a shade of the same colour. This is the compromise every
+        /// traffic map converges on, for the reason they all converge on it.
+        Color HeatColour(float t)
+        {
+            t = Clamp(t, 0.0f, 1.0f);
+            const float r = Clamp(t < 0.5f ? t * 2.0f : 1.0f, 0.0f, 1.0f);
+            const float g = Clamp(t < 0.5f ? 0.35f + t * 1.3f : 2.0f - t * 2.0f, 0.0f, 1.0f);
+            const float b = Clamp(t < 0.25f ? 1.0f - t * 4.0f : 0.0f, 0.0f, 1.0f);
+            return RgbaColor(static_cast<std::uint8_t>(r * 255.0f),
+                             static_cast<std::uint8_t>(g * 255.0f),
+                             static_cast<std::uint8_t>(b * 255.0f));
+        }
+    }
+
+    void CityGame::DrawHeatmap()
+    {
+        if (debug_ == nullptr || heatmap_ == Heatmap::None) return;
+        const Vec2 eye = ToGround(camera_.position);
+        const float range = 1500.0f;
+
+        debug_->begin(camera_.View(), camera_.Projection());
+        debug_->setDepthTested(false);
+
+        switch (heatmap_)
+        {
+            case Heatmap::Traffic:
+            {
+                // Mean speed per road segment, against that road's own limit -- an arterial at
+                // 8 m/s is flowing and an alley at 8 m/s is not, so coluring by absolute speed
+                // would paint the whole suburb red and say nothing.
+                const RoadNetwork& roads = sim_.city().roads();
+                heatSpeed_.assign(roads.segments().size(), 0.0f);
+                heatCount_.assign(roads.segments().size(), 0);
+                for (const Vehicle& vehicle : sim_.traffic().vehicles())
+                {
+                    if (!vehicle.active || vehicle.segment >= heatSpeed_.size()) continue;
+                    heatSpeed_[vehicle.segment] += vehicle.speed;
+                    ++heatCount_[vehicle.segment];
+                }
+                int busiest = 0;
+                for (std::uint32_t i = 0; i < roads.segments().size(); ++i)
+                {
+                    if (heatCount_[i] == 0) continue;
+                    const RoadSegment& segment = roads.segments()[i];
+                    const Vec2 a = roads.nodes()[segment.nodeA].position;
+                    const Vec2 b = roads.nodes()[segment.nodeB].position;
+                    if (DistanceSq(a, eye) > range * range) continue;
+                    busiest = std::max<int>(busiest, heatCount_[i]);
+                    const float mean = heatSpeed_[i] / static_cast<float>(heatCount_[i]);
+                    const float ratio = mean / std::max(1.0f, ProfileOf(segment.roadClass).speedLimit);
+                    // Inverted: red is *slow*, which is the thing worth finding.
+                    debug_->addLine(ToWorld(a, 2.0f), ToWorld(b, 2.0f),
+                                    HeatColour(1.0f - Clamp(ratio, 0.0f, 1.0f)));
+                }
+                char text[96];
+                std::snprintf(text, sizeof(text),
+                              "red = stopped, blue = at the limit   busiest segment %d vehicles",
+                              busiest);
+                heatLegend_ = text;
+                break;
+            }
+
+            case Heatmap::Density:
+            {
+                // Everybody outdoors, binned into a hundred-metre grid. The cell size is the
+                // thing that makes this readable: finer and it is speckle, coarser and a queue at
+                // one junction is smeared over a district.
+                const float cell = 100.0f;
+                const float half = sim_.city().config().halfSize;
+                const int side = std::max(1, static_cast<int>(half * 2.0f / cell) + 1);
+                heatDensity_.assign(static_cast<std::size_t>(side) * side, 0);
+                const auto bin = [&](Vec2 at) {
+                    const int x = Clamp(static_cast<int>((at.X + half) / cell), 0, side - 1);
+                    const int y = Clamp(static_cast<int>((at.Y + half) / cell), 0, side - 1);
+                    auto& value = heatDensity_[static_cast<std::size_t>(y) * side + x];
+                    if (value < 65000) ++value;
+                };
+                for (std::uint32_t agent : sim_.walkingAgents()) bin(sim_.agents().position[agent]);
+                for (std::uint32_t agent : sim_.busQueueAgents()) bin(sim_.agents().position[agent]);
+                for (const Vehicle& vehicle : sim_.traffic().vehicles())
+                {
+                    if (!vehicle.active) continue;
+                    Vec2 at(0.0f, 0.0f);
+                    float heading = 0.0f;
+                    sim_.traffic().Placement(sim_.city(), vehicle, at, heading);
+                    bin(at);
+                }
+
+                std::uint16_t peak = 1;
+                for (const std::uint16_t value : heatDensity_) peak = std::max(peak, value);
+                for (int y = 0; y < side; ++y)
+                    for (int x = 0; x < side; ++x)
+                    {
+                        const std::uint16_t value = heatDensity_[static_cast<std::size_t>(y) * side + x];
+                        if (value == 0) continue;
+                        const Vec2 min(-half + x * cell, -half + y * cell);
+                        if (DistanceSq(min, eye) > range * range) continue;
+                        const float height = 2.0f + 40.0f * static_cast<float>(value) / peak;
+                        debug_->addBox(BoundingBox(ToWorld(min, 1.0f),
+                                                   ToWorld(min + Vec2(cell, cell), height)),
+                                       HeatColour(static_cast<float>(value) / peak));
+                    }
+                char text[96];
+                std::snprintf(text, sizeof(text),
+                              "people and vehicles per 100 m cell   busiest %d", peak);
+                heatLegend_ = text;
+                break;
+            }
+
+            case Heatmap::RenderCost:
+            {
+                // Per chunk, and only the visible ones -- the point of it is to find where the
+                // frame is going, and a chunk that was culled is not costing anything.
+                std::uint32_t peak = 1;
+                for (const std::uint32_t index : visibleChunks_)
+                    peak = std::max<std::uint32_t>(peak, geometry_.chunks()[index].triangles);
+                for (const std::uint32_t index : visibleChunks_)
+                {
+                    const GeometryChunk& chunk = geometry_.chunks()[index];
+                    if (chunk.triangles == 0) continue;
+                    debug_->addBox(chunk.bounds,
+                                   HeatColour(static_cast<float>(chunk.triangles) / peak));
+                }
+                char text[112];
+                std::snprintf(text, sizeof(text),
+                              "triangles per visible chunk   %zu of %zu chunks, dearest %u",
+                              visibleChunks_.size(), geometry_.chunks().size(), peak);
+                heatLegend_ = text;
+                break;
+            }
+
+            case Heatmap::PathCache:
+            {
+                // Where the route planner is missing its cache, per district, faded on the
+                // simulated clock. A cumulative count would be uniform by lunchtime.
+                const std::vector<float>& heat = sim_.pathfinder().heatByDistrict();
+                const float peak = std::max(1.0f, sim_.pathfinder().peakHeat());
+                for (const District& district : sim_.city().districts())
+                {
+                    if (district.id >= heat.size()) continue;
+                    const float value = heat[district.id];
+                    if (value < 0.01f) continue;
+                    const float height = 3.0f + 90.0f * value / peak;
+                    debug_->addBox(BoundingBox(ToWorld(district.rect.min, 1.0f),
+                                               ToWorld(district.rect.max, height)),
+                                   HeatColour(value / peak));
+                }
+                char text[112];
+                std::snprintf(text, sizeof(text),
+                              "route searches per district, ten-second half-life   peak %.0f", peak);
+                heatLegend_ = text;
+                break;
+            }
+
+            case Heatmap::None:
+            case Heatmap::Count:
+                break;
+        }
+        debug_->end();
+    }
+
     void CityGame::DrawOverlay()
     {
+        DrawHeatmap();
         if (debug_ == nullptr || overlay_ == Overlay::None || overlay_ == Overlay::Statistics) return;
         // `begin` opens the batch and forgets the last one, so the shapes have to be submitted
         // *between* begin and end. Submitting them first and calling begin afterwards -- which is
@@ -1817,6 +2006,13 @@ namespace CnaCity
             camera_.position.X, camera_.position.Y, camera_.position.Z,
             static_cast<double>(sim_.clock().timeScale()), paused_ ? "  PAUSED" : "");
         add("QUALITY %s  %s", QualityName(options_.quality), rendererName_.c_str());
+        if (heatmap_ != Heatmap::None)
+        {
+            // The scale, always. A heatmap without one is a picture of where the red is, and the
+            // same city looks alarming or fine depending on what the brightest cell happened to be.
+            add("HEATMAP (F4)  %s", HeatmapName(heatmap_));
+            add("  %s", heatLegend_.c_str());
+        }
         add("SKY LIGHT  %u REBUILDS  LAST %.2f MS%s", skyLight_.rebuildCount(),
             skyLight_.lastRebuildMs(), skyLight_.valid() ? "" : "  (unavailable)");
         if (gpuTiming_ && pipeline_ != nullptr)
@@ -1927,7 +2123,7 @@ namespace CnaCity
         }
 
         const char* help = "1-5 CAMERA   N NEXT   L LOCK   F WEATHER   T/G CLOCK   TAB OVERLAY   "
-                           "P PAUSE   F1 HUD   F2 POST   F3 GPU";
+                           "P PAUSE   F1 HUD   F2 POST   F3 GPU   F4 HEAT";
         text_.DrawShadowed(*batch_, help, 16,
                            device.getViewportProperty().getHeightProperty() - lineHeight - 10,
                            kScale, RgbaColor(150, 160, 175));

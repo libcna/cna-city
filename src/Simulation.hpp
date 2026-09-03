@@ -123,6 +123,7 @@ namespace CnaCity
         [[nodiscard]] const Weather& weather() const { return weather_; }
         [[nodiscard]] Weather& mutableWeather() { return weather_; }
         [[nodiscard]] const Pathfinder& pathfinder() const { return pathfinder_; }
+        [[nodiscard]] Pathfinder& mutablePathfinder() { return pathfinder_; }
         [[nodiscard]] const SimStats& stats() const { return stats_; }
         [[nodiscard]] std::uint64_t tick() const { return tick_; }
         [[nodiscard]] const RoutePool& routes() const { return routes_; }

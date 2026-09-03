@@ -39,6 +39,9 @@ namespace CnaCity
         Quality quality = Quality::High;
         CameraMode camera = CameraMode::Orbit;
         int overlay = 1;   ///< Index into Overlay: 0 none, 1 statistics, 2 road network, 3 routes.
+        /// Index into Heatmap: 0 off, 1 traffic, 2 density, 3 render cost, 4 path planning.
+        /// On the command line as well as on F4, because a screenshot has no keyboard.
+        int heatmap = 0;
 
         int windowWidth = 1600;
         int windowHeight = 900;

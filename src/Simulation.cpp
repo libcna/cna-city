@@ -1453,6 +1453,10 @@ namespace CnaCity
         // second give different fog. Different fog is a different walking aversion, which flips
         // one citizen's mode choice, which is a different city.
         weather_.Update(kMovementStep, clock_.hour());
+        // Faded on the simulated clock rather than on the frame, so the picture an overlay draws
+        // is the same one at any frame rate -- and so it does not depend on how fast the machine
+        // is, which is the whole of the rest of this loop's design.
+        pathfinder_.DecayHeat(kMovementStep);
 
         // Decisions on their own grid, an exact multiple of the tick. A citizen's schedule turns
         // over on the scale of minutes, so re-examining it every tick buys nothing -- and the

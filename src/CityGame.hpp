@@ -44,6 +44,29 @@ namespace CnaCity
     };
 
     /**
+     * @brief A quantity painted over the city, on its own key.
+     *
+     * Separate from @ref Overlay and cycled with `F4` rather than folded into `Tab`, because these
+     * answer a different question. The overlays show what the simulation *is* -- the graph, the
+     * routes; a heatmap shows what it is *costing*, and the two are worth looking at together.
+     *
+     * Every one of them is drawn with a scale on the HUD. A heatmap without a legend is a picture
+     * of where the red is, which is not information -- the same city looks alarming or fine
+     * depending on what the brightest cell happened to be.
+     */
+    enum class Heatmap : std::uint8_t
+    {
+        None = 0,
+        Traffic,      ///< Mean speed per road segment: red is stopped.
+        Density,      ///< People and vehicles per hundred metres of city.
+        RenderCost,   ///< Triangles per visible chunk.
+        PathCache,    ///< Where the route planner is missing its cache.
+        Count
+    };
+
+    [[nodiscard]] const char* HeatmapName(Heatmap heatmap);
+
+    /**
      * @brief The whole demo: a CNA `Game` that owns the simulation and draws it.
      *
      * The class is deliberately the only thing in the project that knows about both halves. The
@@ -101,6 +124,15 @@ namespace CnaCity
         Camera camera_;
         CameraMode cameraMode_ = CameraMode::Orbit;
         Overlay overlay_ = Overlay::Statistics;
+        Heatmap heatmap_ = Heatmap::None;
+        /// Scratch for the heatmaps, kept rather than allocated: they are per-segment and
+        /// per-cell arrays over a city, rebuilt every frame the overlay is on.
+        std::vector<float> heatSpeed_;
+        std::vector<std::uint16_t> heatCount_;
+        std::vector<std::uint16_t> heatDensity_;
+        float heatPeak_ = 0.0f;
+        std::string heatLegend_;
+        void DrawHeatmap();
         std::uint32_t followAgent_ = kNoIndex;
         bool followSnap_ = true;
         bool followLocked_ = false;

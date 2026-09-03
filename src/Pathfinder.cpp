@@ -54,6 +54,23 @@ namespace CnaCity
         districtFrom_.assign(districtCount, 0);
 
         ClearCache();
+        heat_.assign(city.districts().size(), 0.0f);
+        peakHeat_ = 0.0f;
+    }
+
+    void Pathfinder::DecayHeat(float dt)
+    {
+        // A ten-second half-life: long enough that a burst is still visible when somebody looks
+        // up from the HUD, short enough that the picture is about the last few seconds rather than
+        // about the morning.
+        const float keep = std::exp(-dt * 0.0693f);
+        float peak = 0.0f;
+        for (float& value : heat_)
+        {
+            value *= keep;
+            peak = std::max(peak, value);
+        }
+        peakHeat_ = peak;
     }
 
     void Pathfinder::ClearCache()
@@ -272,8 +289,11 @@ namespace CnaCity
             return entry.length;
         }
 
+        // A miss: this query is about to cost a search. That is the thing worth mapping -- a hit
+        // costs nothing and happens wherever the last person went.
         const std::size_t base = out.size();
         const std::uint16_t fromDistrict = roads_->nodes()[startNode].district;
+        if (fromDistrict < heat_.size()) heat_[fromDistrict] += 1.0f;
         const std::uint16_t toDistrict = roads_->nodes()[goalNode].district;
 
         bool ok = false;

@@ -458,3 +458,35 @@ it slightly worse -- pushing a bus back can put it inside whatever is behind.
 Closing it properly means moving the fleet into the IDM arrays, with the junction pass asking the
 bus route for the next segment instead of asking a driver's path. That is a bigger change than the
 one this bought, and the test bounds the residual rather than pretending it is not there.
+
+---
+
+## P17 — Heatmaps: what the city is costing, painted on the city
+
+The overlays showed what the simulation *is* -- the road graph the planner sees, the live routes.
+Nothing showed what it *costs*, so "where is the frame going" and "where is the congestion" were
+questions answered by reading numbers off a HUD and guessing at a place.
+
+- [x] **P17.1 A layer on its own key.** `F4`, not another `Tab` stop, because the two answer
+  different questions and are worth seeing at once. Also `--heatmap NAME`, because a screenshot has
+  no keyboard.
+
+- [x] **P17.2 Four of them, each measured rather than guessed.**
+  *traffic*: mean speed per segment against that road's own limit -- absolute speed would paint
+  every suburb red. *density*: people and vehicles per 100 m cell, a size chosen because finer is
+  speckle and coarser smears a junction across a district. *render*: triangles per **visible**
+  chunk, since a culled one costs nothing. *paths*: route searches per district.
+
+- [x] **P17.3 The path map counts misses, and forgets.** A cache hit costs nothing and happens
+  wherever the last person went, so counting queries would map popularity rather than work. And it
+  decays on a ten-second half-life measured in *simulated* time -- a cumulative count is uniform by
+  lunchtime, and a decay measured in frames would make the picture depend on the frame rate, which
+  the rest of this loop spent P11 and P12 making impossible.
+
+- [x] **P17.4 Every heatmap carries its scale.** The legend line names the quantity and the peak.
+  Without one it is a picture of where the red is, and the same city looks alarming or fine
+  depending on what the brightest cell happened to be.
+
+The colour ramp is blue-green-yellow-red rather than a rainbow or a single hue. A rainbow puts its
+brightest band in the middle and makes a mid value read as the extreme; a single hue makes the
+difference between "busy" and "stopped" a shade of the same colour.

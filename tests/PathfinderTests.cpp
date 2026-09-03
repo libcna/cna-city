@@ -107,6 +107,58 @@ namespace CnaCityTests
         EXPECT_EQ(before, after);
     }
 
+    TEST(Pathfinder, TheHeatMapRisesOnMissesAndFadesAgain)
+    {
+        // What the F4 "path planning" overlay is pointed at. It counts *misses* rather than
+        // queries, because a hit costs nothing and happens wherever the last person went -- and it
+        // decays, because a cumulative count over a simulated day is uniform by lunchtime and
+        // answers no question anybody has.
+        Fixture fixture;
+        ASSERT_FALSE(fixture.pathfinder.heatByDistrict().empty());
+        for (const float value : fixture.pathfinder.heatByDistrict())
+            EXPECT_FLOAT_EQ(value, 0.0f) << "a fresh pathfinder is already warm";
+
+        const auto count = static_cast<std::uint32_t>(fixture.city.roads().nodes().size());
+        Rng rng(4242);
+        std::vector<std::uint32_t> path;
+        for (int i = 0; i < 200; ++i)
+        {
+            path.clear();
+            fixture.pathfinder.FindPath(rng.NextUInt(count), rng.NextUInt(count), TravelMode::Foot,
+                                        path);
+        }
+        fixture.pathfinder.DecayHeat(0.0f);   // recompute the peak without fading it
+        EXPECT_GT(fixture.pathfinder.peakHeat(), 0.0f) << "two hundred searches left no trace";
+
+        float total = 0.0f;
+        for (const float value : fixture.pathfinder.heatByDistrict()) total += value;
+        EXPECT_GT(total, 10.0f);
+
+        // A repeat of a query already in the cache is a hit, and must not add heat.
+        const float before = total;
+        const std::uint32_t a = fixture.city.roads().FindNearestNode(Vec2(-200.0f, 0.0f));
+        const std::uint32_t b = fixture.city.roads().FindNearestNode(Vec2(200.0f, 100.0f));
+        path.clear();
+        fixture.pathfinder.FindPath(a, b, TravelMode::Foot, path);
+        float afterMiss = 0.0f;
+        for (const float value : fixture.pathfinder.heatByDistrict()) afterMiss += value;
+        for (int i = 0; i < 20; ++i)
+        {
+            path.clear();
+            fixture.pathfinder.FindPath(a, b, TravelMode::Foot, path);
+        }
+        float afterHits = 0.0f;
+        for (const float value : fixture.pathfinder.heatByDistrict()) afterHits += value;
+        EXPECT_GT(afterMiss, before) << "a cache miss did not register";
+        EXPECT_FLOAT_EQ(afterHits, afterMiss) << "cache hits are being counted as work";
+
+        // And it fades: sixty seconds is six half-lives.
+        fixture.pathfinder.DecayHeat(60.0f);
+        float faded = 0.0f;
+        for (const float value : fixture.pathfinder.heatByDistrict()) faded += value;
+        EXPECT_LT(faded, afterHits * 0.05f) << "the heat map never cools";
+    }
+
     TEST(Pathfinder, ACarRouteNeverUsesAnAlley)
     {
         // Alleys are service lanes: pedestrians and deliveries. A car route through one is a car
