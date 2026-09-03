@@ -43,7 +43,7 @@ the lamps *are* real lights, `CNA-FINDINGS.md` says they cannot be. The findings
 - [x] **P1.3 `LodGroupEXT` for people and vehicles.** Replace the hand-rolled distance bands with
   the engine's own selector. *Accept:* the three person levels and the vehicle draw distance come
   from `LodGroupEXT::select`, and the frame is unchanged.
-- [ ] **P1.4 Correct what cannot be implemented.** `ClusteredForwardEffect` and `ParticleSystem`
+- [x] **P1.4 Correct what cannot be implemented.** `ClusteredForwardEffect` and `ParticleSystem`
   claims replaced with what the program actually does and why, pointing at `CNA-FINDINGS.md`.
   *Accept:* no claim in `README.md` names a symbol that `grep -r src/` cannot find.
 

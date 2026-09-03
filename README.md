@@ -35,19 +35,33 @@ exists to answer.
 
 ## What it renders
 
-Instanced everything, culled and LOD-selected on the CPU, drawn through the `CNAEXT` pipeline:
+Everything is generated at start-up — there is not one image file in the project — and drawn
+through the `CNAEXT` engine layer:
 
-- `AtmosphericSky` for a physically-derived sky that changes across the day.
-- `CascadedShadowMap` for sun shadows across a city-scale view.
-- `ClusteredForwardEffect` + `ClusteredLightBuffer` so that thousands of street lamps, headlights
-  and windows are real lights at night rather than a painted texture.
-- `RenderPipeline` with HDR, bloom, SSAO, height and volumetric fog, light shafts, depth of field,
-  motion blur, colour grading, ACES tonemapping and FXAA.
-- `InstancedRendererEXT`, `FrustumCullerEXT` and `LodGroupEXT` for the buildings, vehicles,
-  pedestrians and props.
-- `ParticleSystem` for rain and snow, `DebugDraw` for the network overlays.
-- `GpuTimer` and the pipeline's own per-pass timings, because a demo that claims to find
-  bottlenecks has to be able to name them.
+- `AtmosphericSky` for a physically-derived sky that changes across the day, and
+  `EnvironmentProcessor` turning the *same model* into the irradiance and prefiltered specular that
+  `PbrEffect::setImageBasedLightEXT` lights the city with. The ambient is the sky, not a constant.
+- `CascadedShadowMap`, four cascades, for sun shadows across a city-scale view.
+- `RenderPipeline` with HDR and ACES, bloom, SSAO fed by a `DepthNormalPrepass` the game draws
+  itself, height and volumetric fog, light shafts and FXAA. Chromatic aberration and film grain at
+  ultra.
+- `InstancedRendererEXT` and `LodGroupEXT` for the tens of thousands of *identical* lamps, trees,
+  vehicles and people; buildings are baked into per-chunk buffers instead, so each one's facade UVs
+  come from its own dimensions. `FrustumCullerEXT` culls both.
+- `DebugDraw` for the road-network and route overlays, and `RenderPipeline::setGpuTimingEnabledEXT`
+  with `getPassTimingsEXT` (`F3`) so a demo that claims to find bottlenecks can name them.
+
+Two things it deliberately does **not** use, and why — both are in
+[`CNA-FINDINGS.md`](CNA-FINDINGS.md):
+
+- **`ClusteredForwardEffect`.** It is what carries many punctual lights, and it cannot carry a
+  texture set at the same time. A city needs the textures more, so the fourteen thousand street
+  lamps here are emissive geometry and bloom, and they cast no light on the road. That is the
+  single largest thing this demo cannot show, and it is an engine boundary rather than a choice.
+- **`ParticleSystem`.** Rain and snow are this project's own instanced geometry instead. The
+  engine's particle system falls back to a CPU simulation without compute, but it also cannot be
+  told to follow the camera the way a precipitation column has to, and a fixed budget of streaks
+  wrapped around the viewer is both cheaper and what the effect actually needs.
 
 ## Camera modes
 
