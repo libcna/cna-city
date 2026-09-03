@@ -280,10 +280,10 @@ namespace CnaCity
                 walls.AddBox(building.center, 0.0f, building.podiumHalfExtent, building.podiumHeight,
                              building.rotation, uvScale, Vec2(0.0f, 0.0f), false, Vec2(1, 1));
                 roof.AddQuad(
-                    ToWorld(building.center + Rotate(Vec2(-building.podiumHalfExtent.X, building.podiumHalfExtent.Y), building.rotation), building.podiumHeight),
-                    ToWorld(building.center + Rotate(Vec2(building.podiumHalfExtent.X, building.podiumHalfExtent.Y), building.rotation), building.podiumHeight),
-                    ToWorld(building.center + Rotate(Vec2(building.podiumHalfExtent.X, -building.podiumHalfExtent.Y), building.rotation), building.podiumHeight),
                     ToWorld(building.center + Rotate(Vec2(-building.podiumHalfExtent.X, -building.podiumHalfExtent.Y), building.rotation), building.podiumHeight),
+                    ToWorld(building.center + Rotate(Vec2(building.podiumHalfExtent.X, -building.podiumHalfExtent.Y), building.rotation), building.podiumHeight),
+                    ToWorld(building.center + Rotate(Vec2(building.podiumHalfExtent.X, building.podiumHalfExtent.Y), building.rotation), building.podiumHeight),
+                    ToWorld(building.center + Rotate(Vec2(-building.podiumHalfExtent.X, building.podiumHalfExtent.Y), building.rotation), building.podiumHeight),
                     Vector3(0.0f, 1.0f, 0.0f), Vec2(0.0f, 0.0f),
                     Vec2(building.podiumHalfExtent.X * 2.0f * roofScale,
                          building.podiumHalfExtent.Y * 2.0f * roofScale));
@@ -293,11 +293,16 @@ namespace CnaCity
             walls.AddBox(building.center, base, building.halfExtent,
                          std::max(2.0f, building.height - base), building.rotation, uvScale,
                          Vec2(0.0f, base * uvScale.Y), false, Vec2(1, 1));
+            // Wound clockwise as seen from above -- see the winding note in MeshBuilder.hpp. The
+            // other order leaves every flat roof in the city back-facing, and because a building's
+            // walls are culled from the inside, what you see from above instead is the pavement
+            // between the buildings. It reads as a roof, which is why this survived a dozen aerial
+            // screenshots.
             roof.AddQuad(
-                ToWorld(building.center + Rotate(Vec2(-building.halfExtent.X, building.halfExtent.Y), building.rotation), building.height),
-                ToWorld(building.center + Rotate(Vec2(building.halfExtent.X, building.halfExtent.Y), building.rotation), building.height),
-                ToWorld(building.center + Rotate(Vec2(building.halfExtent.X, -building.halfExtent.Y), building.rotation), building.height),
                 ToWorld(building.center + Rotate(Vec2(-building.halfExtent.X, -building.halfExtent.Y), building.rotation), building.height),
+                ToWorld(building.center + Rotate(Vec2(building.halfExtent.X, -building.halfExtent.Y), building.rotation), building.height),
+                ToWorld(building.center + Rotate(Vec2(building.halfExtent.X, building.halfExtent.Y), building.rotation), building.height),
+                ToWorld(building.center + Rotate(Vec2(-building.halfExtent.X, building.halfExtent.Y), building.rotation), building.height),
                 Vector3(0.0f, 1.0f, 0.0f), Vec2(0.0f, 0.0f),
                 Vec2(building.halfExtent.X * 2.0f * roofScale,
                      building.halfExtent.Y * 2.0f * roofScale));

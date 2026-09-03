@@ -135,9 +135,11 @@ prepass replaces the program, and the "depth" recorded is then the shaded frame'
 makes SSAO compare shading against shading and produce a weak, plausible dimming everywhere instead
 of occlusion at contacts. It costs 0.9 ms at street level.
 
-The analytic sky is `AtmosphericSky`, which models a clear atmosphere and keeps producing sunset
-red below the horizon. Rather than replace it, cloud cover and night are painted over it as one
-blended sheet whose weights are both zero on a clear day.
+The analytic sky is `AtmosphericSky`. It models a clear atmosphere and has no cloud term, and it is
+undefined below the horizon -- the model keeps integrating and returns a saturated red shading to
+yellow-green, which arrives as a band of colour along every roofline in a night frame. So it is not
+drawn once the sun has set, and cloud cover and night are painted over it as one blended sheet whose
+weights are both zero on a clear day. See [`CNA-FINDINGS.md`](CNA-FINDINGS.md) A4.
 
 ## 6. What CNA could not do here
 
@@ -163,6 +165,10 @@ every iteration is a fresh operating-system thread. That is the right shape for 
 generation, which runs once over a hundred thousand agents and is where this program uses it. It is
 the wrong shape for five loops that run thirty times a second, so the tick uses a persistent pool
 instead.
+
+The full list, with what was checked to establish each one -- and the three things that looked like
+engine defects and turned out to be this program's own mistakes -- is in
+[`CNA-FINDINGS.md`](CNA-FINDINGS.md).
 
 ## 7. Measured
 

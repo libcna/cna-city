@@ -116,12 +116,13 @@ And which half of the program dominates depends on where the camera is: from fou
 the shadow cascades put the renderer ahead, and at street level the simulation is the larger of the
 two even with almost nothing on screen. The whole static city is 220 000 triangles.
 
-Two things CNA could not do here are written down as plainly as the things it could: thousands of
-street lights cannot be real lights while a surface also needs a texture set, and there is no vertex
-attribute slot left for a per-instance colour. Both, and every defect found on the way — including
-the four that produced a city where nobody ever arrived anywhere and the one that made every road
-in the city invisible — are in [`ARCHITECTURE.md`](ARCHITECTURE.md), with the measurement beside
-each claim.
+What CNA could not do here is written down as plainly as what it could, in
+[`CNA-FINDINGS.md`](CNA-FINDINGS.md) — seven capability gaps, each checked against CNA's own
+source before it was written down, and three things that looked like engine defects and turned
+out to be this program's mistakes. Every defect found on the way — including the four that
+produced a city where nobody ever arrived anywhere, the one that made every road invisible, and
+the one that quietly removed every roof — is in [`ARCHITECTURE.md`](ARCHITECTURE.md), with the
+measurement beside each claim.
 
 ## License
 

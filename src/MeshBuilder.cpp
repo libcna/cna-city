@@ -86,8 +86,8 @@ namespace CnaCity
         }
 
         if (includeTop)
-            AddQuad(ToWorld(corner[3], top), ToWorld(corner[2], top), ToWorld(corner[1], top),
-                    ToWorld(corner[0], top), Vector3(0.0f, 1.0f, 0.0f), Vec2(0.0f, 0.0f),
+            AddQuad(ToWorld(corner[0], top), ToWorld(corner[1], top), ToWorld(corner[2], top),
+                    ToWorld(corner[3], top), Vector3(0.0f, 1.0f, 0.0f), Vec2(0.0f, 0.0f),
                     Vec2(topUvScale.X, topUvScale.Y));
 
         // A floor, off by default. Every building in the city stands on the ground, where a
@@ -95,8 +95,8 @@ namespace CnaCity
         // third of a metre above the road, and without this you can see up into it from any camera
         // low enough to be interesting.
         if (includeBottom)
-            AddQuad(ToWorld(corner[0], baseY), ToWorld(corner[1], baseY), ToWorld(corner[2], baseY),
-                    ToWorld(corner[3], baseY), Vector3(0.0f, -1.0f, 0.0f), Vec2(0.0f, 0.0f),
+            AddQuad(ToWorld(corner[3], baseY), ToWorld(corner[2], baseY), ToWorld(corner[1], baseY),
+                    ToWorld(corner[0], baseY), Vector3(0.0f, -1.0f, 0.0f), Vec2(0.0f, 0.0f),
                     Vec2(topUvScale.X, topUvScale.Y));
     }
 
@@ -157,7 +157,7 @@ namespace CnaCity
             vertices.emplace_back(ToWorld(p, top), up, tangent,
                                   Vector2(p.X * uvScale, p.Y * uvScale));
         for (std::uint32_t i = 1; i + 1 < n; ++i)
-            indices.insert(indices.end(), {base, base + i + 1, base + i});
+            indices.insert(indices.end(), {base, base + i, base + i + 1});
     }
 
     void MeshData::AddCylinder(Vec2 center, float baseY, float radius, float height, int sides,

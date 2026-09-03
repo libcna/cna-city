@@ -18,6 +18,30 @@ namespace CnaCity
     using CityVertex = Microsoft::Xna::Framework::Graphics::VertexPositionNormalTangentTexture;
 
     /**
+     * @brief The winding this file builds to, because getting it backwards is silent.
+     *
+     * CNA inherits XNA's contract, and `modules/graphics/examples/frontface_winding_test.cpp`
+     * states it from the FNA source rather than from any renderer's behaviour: under the default
+     * `RasterizerState::CullCounterClockwise`, **a triangle that appears clockwise on screen is the
+     * front face**, and each cull enum names the face it *removes*. In world terms that means the
+     * right-hand-rule normal of a front-facing triangle points *into* the solid -- away from the
+     * eye that is meant to see it.
+     *
+     * So an upward-facing surface -- a road, a pavement, a roof -- must be wound so its winding
+     * normal points **down**. Winding it "counter-clockwise from above", which is what the phrase
+     * "counter-clockwise is front-facing" leads you to write, produces a surface that is invisible
+     * from above and visible only from underneath.
+     *
+     * This cost two separate defects in this project, and neither announced itself. The first made
+     * every carriageway in the city back-facing, so what showed through was the ground plane: a
+     * strip of grass down the middle of every street, with the lamp posts and street trees
+     * correctly placed on either side of it. The second removed every flat roof, which is far
+     * harder to notice -- from four hundred metres up you look *into* the buildings, whose walls
+     * are culled from the inside, and what you see is the pavement between them. It reads as a
+     * roof.
+     */
+
+    /**
      * @brief A CPU-side triangle mesh being assembled, before it becomes a GPU buffer.
      *
      * Everything visible in this city is built here at start-up: there is no content pipeline and

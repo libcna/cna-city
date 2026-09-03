@@ -29,10 +29,18 @@ everything lives under *Unreleased*.
 - **`--bench`**, a scale sweep with no graphics device at all, and `--headless` for a full
   simulated day.
 
+### Fixed
+- Every flat roof in the city was back-facing and therefore not drawn. From above you look *into*
+  the buildings, whose walls are culled from the inside, and what shows through is the pavement
+  between them — it reads as a roof, and it survived a dozen aerial screenshots.
+- The analytic sky is not drawn below the horizon, where the model is undefined and returns a
+  saturated gradient that arrived as a band of colour along every roofline at night.
+
 ### Measured
 On an AMD Radeon 780M with 16 threads, at a hundred thousand citizens: the city generates from one
 seed in 24 ms, the simulation tick averages 2.29 ms (p99 3.70 ms) in 24.5 MB, and the frame runs at
 75 fps from a city overview and 107-145 fps at street level, at 1600x900 with four shadow cascades,
 HDR, bloom and FXAA. A hundred times the agents costs 8.1 times the tick, because the route cache's
 hit rate rises with population from 8% to 38%. Full tables and the defects found along the way are
-in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+in [`ARCHITECTURE.md`](ARCHITECTURE.md), and what CNA itself would need to fix is in
+[`CNA-FINDINGS.md`](CNA-FINDINGS.md).

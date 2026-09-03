@@ -101,11 +101,11 @@ namespace CnaCity
         // costs resolution rather than buying range.
         // Every setting is named, including the ones being switched *off*.
         //
-        // `RenderPipelineSettings` has its own defaults and several of them are not zero, so a
-        // quality level that only sets what it wants inherits the rest. That is how a band of red
-        // and green fringing ended up along every roofline against the sky at High: chromatic
-        // aberration was never asked for and never turned off, and it is at its strongest at the
-        // top of the frame where the contrast is.
+        // Not because the defaults are wrong -- `RenderPipelineSettings` starts every optional
+        // pass at zero or false, which was checked rather than assumed -- but because the quality
+        // levels are re-applied and a level that only names what it wants would inherit whatever
+        // the previous one left behind. Naming all of them is also the cheapest possible answer to
+        // "which passes are actually on in this frame".
         settings.setHDREnabled(true);
         settings.setTonemappingMode(TonemappingMode::Aces);
         settings.setExposure(1.0f);
@@ -1016,7 +1016,9 @@ namespace CnaCity
         const float day = sim_.clock().Daylight();
         const float cloud = sim_.weather().cloudiness();
         const float cloudWeight = cloud * 0.88f;
-        const float nightWeight = (1.0f - day) * 0.80f;
+        // Fully opaque once the analytic sky has stopped being drawn, because at that point there
+        // is nothing underneath it but the clear colour.
+        const float nightWeight = SmoothStep(0.10f, 0.0f, day);
         const float weight = std::max(cloudWeight, nightWeight);
         if (weight < 0.01f) return;
 
@@ -1157,7 +1159,12 @@ namespace CnaCity
             device.Clear(clearColor);
         }
 
-        if (sky_ != nullptr)
+        // The analytic sky is only meaningful while the sun is above the horizon. `AtmosphericSky`
+        // takes any direction and keeps integrating, so below the horizon it goes on producing a
+        // deep sunset red that shades into yellow and green further up -- which arrives as a band
+        // of colour along every roofline against a night sky. It is not drawn at all after dusk;
+        // the overlay below paints the night instead.
+        if (sky_ != nullptr && day > 0.015f)
         {
             // The sky writes no depth and is drawn first, so every pixel the city covers is
             // overwritten and the rest is atmosphere.
