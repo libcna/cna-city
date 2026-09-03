@@ -132,6 +132,22 @@ namespace CnaCity
             for (std::uint32_t i = 0; i < lines_[l].stations.size(); ++i)
                 stations_[lines_[l].stations[i]].lines.emplace_back(l, i);
 
+        // Each platform runs along the line through it. An interchange takes the first line's
+        // direction, which is the same simplification as giving it one platform: two lines meeting
+        // at an angle would need two, and one is enough to stand on.
+        for (MetroStation& station : stations_)
+        {
+            if (station.lines.empty()) continue;
+            const auto [line, index] = station.lines.front();
+            const MetroLine& l = lines_[line];
+            const std::size_t next = index + 1 < l.points.size() ? index + 1 : index - 1;
+            if (next < l.points.size())
+            {
+                const Vec2 delta = l.points[next] - l.points[index];
+                if (LengthSq(delta) > 1e-4f) station.axis = Normalized(delta);
+            }
+        }
+
         // Trains, spaced by headway rather than by count, so a longer line gets more of them --
         // which is how a real timetable works and why the ring line is the busy one.
         for (std::uint32_t l = 0; l < lines_.size(); ++l)

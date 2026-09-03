@@ -81,6 +81,7 @@ namespace CnaCity
         setIsMouseVisibleProperty(true);
         cameraMode_ = options_.camera;
         overlay_ = static_cast<Overlay>(Clamp(options_.overlay, 0, static_cast<int>(Overlay::Count) - 1));
+        postProcessing_ = !options_.noPost;
     }
 
     CityGame::~CityGame() = default;
@@ -494,10 +495,17 @@ namespace CnaCity
                 const auto mode = static_cast<Mode>(sim_.agents().mode[followAgent_]);
                 // Behind and above the shoulder, and closer when the subject is on foot than when
                 // they are in a car or on a train.
-                const bool underground = mode == Mode::Riding || mode == Mode::WaitingTrain;
+                const bool riding = mode == Mode::Riding;
+                const bool waiting = mode == Mode::WaitingTrain;
+                const bool underground = riding || waiting;
+                // A passenger standing on a platform faces the track, so "behind them" is through
+                // the back wall of the station -- 10 m of it. The camera stands beside them
+                // instead and looks along the platform, which is also the only angle from which a
+                // platform looks like a platform: the crowd in a row, the edge, the track beyond.
                 const float distance = mode == Mode::Walking ? 6.5f
                                      : mode == Mode::Indoors ? 11.0f
-                                     : underground           ? 12.0f
+                                     : waiting               ? -7.5f
+                                     : riding                ? 10.5f
                                                              : 13.0f;
                 // Underground the offset has to stay *inside* the tunnel. The running tunnel's
                 // roof is 3.4 m above the track, so the 4.6 m a road vehicle gets puts the lens in
@@ -505,7 +513,8 @@ namespace CnaCity
                 // the first underground frames showed.
                 const float height = mode == Mode::Walking ? 2.6f
                                    : mode == Mode::Indoors ? 6.0f
-                                   : underground           ? 1.9f
+                                   : waiting               ? 1.70f
+                                   : riding                ? 1.55f
                                                            : 4.6f;
                 // Indoors the subject's heading is stale, so the camera swings off the doorway's
                 // own axis instead: standing behind a citizen who is not facing anywhere puts the
@@ -515,6 +524,32 @@ namespace CnaCity
                                           : sim_.agents().heading[followAgent_];
                 Vector3 wanted(subject.X - std::cos(heading) * distance, subject.Y + height,
                                subject.Z - std::sin(heading) * distance);
+                if (underground && sim_.MetroCameraPoint(followAgent_, distance,
+                                                          waiting ? 0.0f : 2.6f, height, wanted))
+                {
+                    // Placed off the track's own geometry; nothing more to do to it.
+                }
+                else if (underground)
+                {
+                    // Beside the train rather than behind it. A carriage is eighteen metres long,
+                    // so a camera twelve metres back in a tunnel is looking at the flat end of one
+                    // and nothing else; step out of the four-foot and you get its lit flank
+                    // running past you, which is what riding a metro looks like.
+                    //
+                    // 2.6 m and not more, on either side. The offset is taken from the subject's
+                    // heading, and a train's heading reverses when it turns round at a terminus,
+                    // so this lands on the platform side of the track half the time and on the
+                    // walkway side the other half. The walkway side has a wall 3.1 m out, so an
+                    // offset chosen to reach the platform puts the lens in the concrete every
+                    // other trip.
+                    //
+                    // On a platform the same offset runs *along* the platform, which is 84 m
+                    // long, so it can be as large as the shot wants without leaving the station.
+                    const float right = heading + 1.5708f;
+                    const float lateral = waiting ? 6.5f : 2.6f;
+                    wanted = Vector3(wanted.X + std::cos(right) * lateral, wanted.Y,
+                                     wanted.Z + std::sin(right) * lateral);
+                }
 
                 // Pull the camera out of whatever it is standing in. A pedestrian walks along a
                 // pavement with a building right behind them, so a chase camera at a fixed
@@ -542,7 +577,15 @@ namespace CnaCity
                 }
                 else
                 {
-                    camera_.EaseTo(wanted, dt, mode == Mode::Indoors ? 0.9f : 0.28f);
+                    // Eased in *simulated* seconds, not real ones. The half-life was 0.28 s of
+                    // wall clock while the world runs at sixty times real time, so a metro train
+                    // at 21 m/s covers 1 260 m of world for every second the camera spends
+                    // catching up -- and the shot was reliably half a kilometre of empty tunnel
+                    // with a train the size of a pixel at the end of it. Following a moving
+                    // subject is a simulated-time problem and has to be measured in the
+                    // simulation's clock.
+                    camera_.EaseTo(wanted, dt * sim_.clock().timeScale(),
+                                   mode == Mode::Indoors ? 0.9f : 0.28f);
                 }
                 camera_.LookAt(Vector3(subject.X, subject.Y + 1.2f, subject.Z));
                 break;
@@ -670,6 +713,15 @@ namespace CnaCity
 
     void CityGame::UpdateLighting()
     {
+        // How far the camera is below street level, as a 0..1 blend. Everything the sky does to
+        // the city has to stop at the tunnel roof: a metre of concrete is between the viewer and
+        // the sun, and no amount of shadow mapping expresses that, because the cascades are fitted
+        // to a view frustum that is entirely underground and there is nothing above it to cast.
+        // Without this the tunnel is lit by an 8 a.m. sky and comes out as a uniform white tube.
+        undergroundLevel_ = Saturate(-camera_.position.Y / 3.5f);
+        const float above = 1.0f - undergroundLevel_;
+        const float skyReach = 0.035f + 0.965f * above;
+
         const Vector3 sunDirection = sim_.clock().SunDirection();
         const Vector3 moonDirection = sim_.clock().MoonDirection();
         const float day = sim_.clock().Daylight();
@@ -708,24 +760,41 @@ namespace CnaCity
             getGraphicsDeviceProperty(), sunDirection,
             Clamp(sim_.weather().turbidity(), 1.8f, 5.5f), day, sim_.weather().cloudiness(),
             sim_.clock().StreetLightLevel());
-        if (skyLight_.valid()) effect_->setImageBasedLightEXT(skyLight_.light());
+        if (skyLight_.valid())
+        {
+            // `ImageBasedLightEXT::Intensity` is the one multiplier the whole environment has --
+            // the cubes themselves are 8-bit and cannot hold a brightness above one -- so it is
+            // also the only place the sky can be told it does not reach a tunnel.
+            ImageBasedLightEXT ibl = skyLight_.light();
+            ibl.Intensity *= skyReach;
+            effect_->setImageBasedLightEXT(ibl);
+        }
 
         auto& light0 = effect_->getDirectionalLight0Property();
         light0.setEnabledProperty(true);
         light0.setDirectionProperty(sun_.Direction);
         const Vector3 sunColor = SunColor();
         const float moonlight = (1.0f - day) * 0.010f * (1.0f - 0.7f * sim_.weather().cloudiness());
-        light0.setDiffuseColorProperty(Vector3(sunColor.X + moonlight * 0.7f,
-                                                sunColor.Y + moonlight * 0.8f,
-                                                sunColor.Z + moonlight * 1.0f));
-        light0.setSpecularColorProperty(Vector3(sunColor.X * 0.6f, sunColor.Y * 0.6f, sunColor.Z * 0.6f));
+        light0.setDiffuseColorProperty(Vector3((sunColor.X + moonlight * 0.7f) * skyReach,
+                                                (sunColor.Y + moonlight * 0.8f) * skyReach,
+                                                (sunColor.Z + moonlight * 1.0f) * skyReach));
+        light0.setSpecularColorProperty(Vector3(sunColor.X * 0.6f * skyReach,
+                                                sunColor.Y * 0.6f * skyReach,
+                                                sunColor.Z * 0.6f * skyReach));
 
         // A dim fill from the opposite side, which stands in for the bounce a single directional
         // light cannot produce. Without it every north face in the city is flat black.
         auto& light1 = effect_->getDirectionalLight1Property();
         light1.setEnabledProperty(true);
         light1.setDirectionProperty(Vector3(-sun_.Direction.X, 0.45f, -sun_.Direction.Z));
-        const Vector3 ambient = AmbientColor();
+        const Vector3 daylightAmbient = AmbientColor();
+        // Underground the ambient does not go to zero, it goes to what the tunnel's own light
+        // strips bounce off the walls -- a warm, very dim fill rather than the sky's blue one.
+        const Vector3 tunnelAmbient(0.0225f, 0.0202f, 0.0168f);
+        const Vector3 ambient(
+            daylightAmbient.X * skyReach + tunnelAmbient.X * undergroundLevel_,
+            daylightAmbient.Y * skyReach + tunnelAmbient.Y * undergroundLevel_,
+            daylightAmbient.Z * skyReach + tunnelAmbient.Z * undergroundLevel_);
         light1.setDiffuseColorProperty(Vector3(ambient.X * 1.6f, ambient.Y * 1.6f, ambient.Z * 1.8f));
         light1.setSpecularColorProperty(Vector3::Zero);
         effect_->getDirectionalLight2Property().setEnabledProperty(false);
@@ -857,6 +926,7 @@ namespace CnaCity
         // ---- Instances ---------------------------------------------------------------------
         instances_.BeginFrame();
         drawnPeople_ = drawnVehicles_ = drawnProps_ = drawnParked_ = 0;
+        drawnTrainCars_ = 0;
 
         const Vector3 eye = camera_.position;
         const auto distanceSq = [&](Vec2 p) {
@@ -988,6 +1058,26 @@ namespace CnaCity
             }
         }
 
+        // The people standing on a platform. They are drawn from their own list rather than being
+        // folded into the walking one, because they are a metre above the rail and the walking
+        // pass assumes ground level -- and because a platform with nobody on it is the clearest
+        // possible statement that a simulation is not being shown.
+        for (std::uint32_t agent : sim_.waitingAgents())
+        {
+            const Vec2 position = agents.position[agent];
+            if (distanceSq(position) > 180.0f * 180.0f) continue;
+            const Vector3 at = sim_.AgentWorldPosition(agent);
+            const BoundingBox bounds(Vector3(at.X - 0.6f, at.Y - 0.2f, at.Z - 0.6f),
+                                      Vector3(at.X + 0.6f, at.Y + 2.2f, at.Z + 0.6f));
+            if (!culler_.isVisible(bounds)) continue;
+            const int level = personLod_.selectIndex(std::sqrt(distanceSq(position)));
+            instances_.AddPerson(static_cast<PersonLod>(std::max(0, level)), 0,
+                                 agents.Appearance(agent),
+                                 Matrix::CreateRotationY(-agents.heading[agent] + kPi * 0.5f) *
+                                     Matrix::CreateTranslation(at.X, at.Y, at.Z));
+            ++drawnPeople_;
+        }
+
         // Trains, three cars each, only when the camera is underground or close enough that the
         // tunnel mouth is visible.
         for (const MetroTrain& train : sim_.metro().trains())
@@ -1002,6 +1092,7 @@ namespace CnaCity
                 const Vec2 ahead = sim_.metro().PointOnLine(train.line, offset + 4.0f);
                 instances_.AddTrain(Matrix::CreateRotationY(-Heading(ahead - at)) *
                                     Matrix::CreateTranslation(at.X, kMetroDepth, at.Y));
+                ++drawnTrainCars_;
             }
         }
     }
@@ -1470,10 +1561,11 @@ namespace CnaCity
             stats.tripsDeferred, stats.routeFailures);
         add("DRAWS %d  TRIS %dK  CHUNKS %zu/%zu", drawCalls_, visibleTriangles_ / 1000,
             visibleChunks_.size(), geometry_.chunks().size());
-        add("DRAWN  PEOPLE %zu  MOVING %zu  PARKED %zu  PROPS %zu", drawnPeople_, drawnVehicles_,
-            drawnParked_, drawnProps_);
+        add("DRAWN  PEOPLE %zu  MOVING %zu  PARKED %zu  PROPS %zu  CARS %zu", drawnPeople_,
+            drawnVehicles_, drawnParked_, drawnProps_, drawnTrainCars_);
         add("");
-        add("CAMERA %s   TIME x%.0f%s", CameraModeName(cameraMode_),
+        add("CAMERA %s AT %.0f %.0f %.0f   TIME x%.0f%s", CameraModeName(cameraMode_),
+            camera_.position.X, camera_.position.Y, camera_.position.Z,
             static_cast<double>(sim_.clock().timeScale()), paused_ ? "  PAUSED" : "");
         add("QUALITY %s  %s", QualityName(options_.quality), rendererName_.c_str());
         add("SKY LIGHT  %u REBUILDS  LAST %.2f MS%s", skyLight_.rebuildCount(),

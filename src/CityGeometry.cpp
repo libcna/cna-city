@@ -17,6 +17,44 @@ namespace CnaCity
     {
         constexpr float kPi = 3.14159265358979323846f;
 
+        /**
+         * @brief One quad of an enclosure, wound so that it is visible from @p interior.
+         *
+         * CNA's rule is a single rule -- a triangle is drawn when its winding normal points away
+         * from the camera -- and it is still the easiest thing in this program to get wrong,
+         * because the sign flips with which side of the surface you are standing on and a mirrored
+         * copy of a correct quad is an incorrect one. The metro was built out of hand-wound quads
+         * and four of the six faces of every tunnel were inside out: from a train you looked
+         * through the wall at the city, and from the platform you looked through the roof at the
+         * sky.
+         *
+         * So no caller states an order any more. It states a point that is inside the space being
+         * enclosed, and both the winding and the shading normal -- which points the opposite way,
+         * back into the space -- are derived from that. It is one cross product per quad at
+         * generation time and it makes the whole class of bug unrepresentable.
+         */
+        void AddFacet(MeshData& mesh, Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3,
+                      Vector3 interior, Vec2 uvMin, Vec2 uvMax)
+        {
+            const Vector3 e1(v1.X - v0.X, v1.Y - v0.Y, v1.Z - v0.Z);
+            const Vector3 e2(v2.X - v0.X, v2.Y - v0.Y, v2.Z - v0.Z);
+            Vector3 winding(e1.Y * e2.Z - e1.Z * e2.Y, e1.Z * e2.X - e1.X * e2.Z,
+                            e1.X * e2.Y - e1.Y * e2.X);
+            const Vector3 toInterior(interior.X - v0.X, interior.Y - v0.Y, interior.Z - v0.Z);
+            if (winding.X * toInterior.X + winding.Y * toInterior.Y + winding.Z * toInterior.Z > 0.0f)
+            {
+                std::swap(v0, v3);
+                std::swap(v1, v2);
+                winding = Vector3(-winding.X, -winding.Y, -winding.Z);
+            }
+            const float length = std::sqrt(winding.X * winding.X + winding.Y * winding.Y +
+                                           winding.Z * winding.Z);
+            const float scale = length > 1e-6f ? -1.0f / length : 0.0f;
+            mesh.AddQuad(v0, v1, v2, v3,
+                         Vector3(winding.X * scale, winding.Y * scale, winding.Z * scale),
+                         uvMin, Vec2(uvMax.X - uvMin.X, uvMax.Y - uvMin.Y));
+        }
+
         /// Heights, in metres, of the layers that share the ground plane. They are separated by
         /// centimetres rather than by a depth-bias trick because a city seen from four hundred
         /// metres up has a depth buffer stretched thin enough that polygon offset stops working,
@@ -389,48 +427,207 @@ namespace CnaCity
             }
         }
 
-        // ---- Metro stations and tunnels -----------------------------------------------------------
+        // ---- The underground ---------------------------------------------------------------------
+        //
+        // Only the follow camera ever comes down here, which is exactly why it is worth building:
+        // the most interesting thirty seconds of a citizen's day is the part where they disappear
+        // down a staircase and come up two kilometres away, and until this existed that part of
+        // the demonstration was a black screen.
+        // The shell is one swept tube per line rather than a box per segment. A box per segment
+        // has a joint at every station, a joint is a seam, and a seam between two boxes that meet
+        // at an angle is a wedge of open ground -- which from inside a train is the city showing
+        // through the tunnel wall. Sweeping a single cross-section along the polyline and mitring
+        // it at the bends leaves nothing to butt against, so there is nothing to leak.
         for (const MetroLine& line : metro.lines())
-            for (std::size_t i = 1; i < line.points.size(); ++i)
+        {
+            const std::vector<Vec2>& points = line.points;
+            if (points.size() < 2) continue;
+
+            // The mitred cross-section frame at every point on the line: the lateral unit vector,
+            // stretched by 1/cos(half the turn) so that the offset walls still meet exactly on the
+            // outside of a bend rather than falling short of each other.
+            std::vector<Vec2> ribs(points.size());
+            for (std::size_t i = 0; i < points.size(); ++i)
             {
-                const Vec2 a = line.points[i - 1];
-                const Vec2 b = line.points[i];
-                const float length = Distance(a, b);
-                if (length < 1.0f) continue;
-                MeshData& mesh = meshFor((a + b) * 0.5f, CityMaterial::MetroTunnel);
-                // A tunnel floor and two walls. Only ever seen by the follow camera, which is
-                // exactly when it matters: a citizen riding to work should be riding through
-                // something.
-                mesh.AddRibbon(a, b, 4.2f, kMetroDepth - 2.6f, 0.0f, length / 6.0f, 0.0f, 1.4f);
-                const Vec2 side = Perp(Normalized(b - a)) * 4.2f;
-                for (int s = -1; s <= 1; s += 2)
-                {
-                    const Vec2 shift = side * static_cast<float>(s);
-                    mesh.AddQuad(ToWorld(a + shift, kMetroDepth - 2.6f), ToWorld(b + shift, kMetroDepth - 2.6f),
-                                 ToWorld(b + shift, kMetroDepth + 3.4f), ToWorld(a + shift, kMetroDepth + 3.4f),
-                                 Vector3(-side.X, 0.0f, -side.Y), Vec2(0.0f, 0.0f),
-                                 Vec2(length / 6.0f, 1.0f));
-                }
-                // A roof over the tunnel. Without one a passenger on a train looks *up* and sees
-                // the sky: the ground above is a single-sided surface facing the other way, so it
-                // is culled from below and there is nothing between the carriage and the horizon.
-                // Two triangles a segment for the only part of the network a rider ever sees.
-                mesh.AddQuad(ToWorld(b + side, kMetroDepth + 3.4f), ToWorld(a + side, kMetroDepth + 3.4f),
-                             ToWorld(a - side, kMetroDepth + 3.4f), ToWorld(b - side, kMetroDepth + 3.4f),
-                             Vector3(0.0f, -1.0f, 0.0f), Vec2(0.0f, 0.0f),
-                             Vec2(length / 6.0f, 1.4f));
+                const Vec2 in = i > 0 ? Normalized(points[i] - points[i - 1]) : Vec2(0.0f, 0.0f);
+                const Vec2 out = i + 1 < points.size() ? Normalized(points[i + 1] - points[i])
+                                                       : Vec2(0.0f, 0.0f);
+                if (i == 0) { ribs[i] = Perp(out); continue; }
+                if (i + 1 == points.size()) { ribs[i] = Perp(in); continue; }
+                const Vec2 bisector = Normalized(Perp(in) + Perp(out));
+                // Clamped, because a hairpin would otherwise send the mitre off to infinity and
+                // take the tunnel wall a kilometre sideways with it.
+                ribs[i] = bisector * (1.0f / std::max(0.45f, Dot(bisector, Perp(in))));
             }
+
+            float travelled = 0.0f;
+            // A running tunnel between two stations is often four hundred metres long, and the
+            // chunk it lands in is three hundred and forty across, so it is cut into pieces short
+            // enough that each one stays inside the chunk that owns it. Interpolating the two
+            // mitred cross-sections linearly is exact rather than approximate: the wall between
+            // them is a straight line, so a point partway along it is the same lerp.
+            std::vector<Vec2> cuts;
+            std::vector<Vec2> cutRibs;
+            for (std::size_t i = 1; i < points.size(); ++i)
+            {
+                const float span = Distance(points[i - 1], points[i]);
+                const int pieces = std::max(1, static_cast<int>(std::ceil(span / 48.0f)));
+                for (int k = 0; k < pieces; ++k)
+                {
+                    const float t = static_cast<float>(k) / static_cast<float>(pieces);
+                    cuts.push_back(points[i - 1] + (points[i] - points[i - 1]) * t);
+                    cutRibs.push_back(ribs[i - 1] + (ribs[i] - ribs[i - 1]) * t);
+                }
+            }
+            cuts.push_back(points.back());
+            cutRibs.push_back(ribs.back());
+
+            for (std::size_t i = 1; i < cuts.size(); ++i)
+            {
+                const Vec2 from = cuts[i - 1];
+                const Vec2 to = cuts[i];
+                const float length = Distance(from, to);
+                if (length < 0.5f) continue;
+                const Vec2 ribA = cutRibs[i - 1];
+                const Vec2 ribB = cutRibs[i];
+                const Vec2 mid = (from + to) * 0.5f;
+                const Vector3 inside = ToWorld(mid, kMetroDepth + (kMetroTunnelRoof + kMetroTrackBed) * 0.5f);
+
+                // A point on the cross-section, at lateral offset `t` from the track centreline.
+                const auto at = [&](bool second, float t, float y) {
+                    const Vec2 base = second ? to : from;
+                    const Vec2 rib = second ? ribB : ribA;
+                    return ToWorld(base + rib * t, kMetroDepth + y);
+                };
+                const float u0 = travelled / 4.0f;
+                const float u1 = (travelled + length) / 4.0f;
+                travelled += length;
+
+                MeshData& mesh = meshFor(mid, CityMaterial::MetroTunnel);
+                MeshData& floor = meshFor(mid, CityMaterial::MetroFloor);
+                const float wallV = (kMetroTunnelRoof - kMetroTrackBed) / 4.0f;
+                // Floor, roof and the two side walls. Every one of them is handed to AddFacet with
+                // a point known to be inside the tube, so none of them can be wound inside out --
+                // which four of the six faces of the old shell were, independently.
+                AddFacet(floor, at(false, kMetroWallNear, kMetroTrackBed),
+                         at(true, kMetroWallNear, kMetroTrackBed),
+                         at(true, kMetroWallFar, kMetroTrackBed),
+                         at(false, kMetroWallFar, kMetroTrackBed), inside,
+                         Vec2(u0, 0.0f), Vec2(u1, (kMetroWallFar - kMetroWallNear) / 4.0f));
+                AddFacet(mesh, at(false, kMetroWallNear, kMetroTunnelRoof),
+                         at(true, kMetroWallNear, kMetroTunnelRoof),
+                         at(true, kMetroWallFar, kMetroTunnelRoof),
+                         at(false, kMetroWallFar, kMetroTunnelRoof), inside,
+                         Vec2(u0, 0.0f), Vec2(u1, (kMetroWallFar - kMetroWallNear) / 4.0f));
+                for (const float t : {kMetroWallNear, kMetroWallFar})
+                    AddFacet(mesh, at(false, t, kMetroTrackBed), at(true, t, kMetroTrackBed),
+                             at(true, t, kMetroTunnelRoof), at(false, t, kMetroTunnelRoof), inside,
+                             Vec2(u0, 0.0f), Vec2(u1, wallV));
+
+                // A raised walkway down the side away from the platform -- the evacuation path a
+                // real running tunnel has, and the thing that stops the near side of the tube
+                // reading as a flat wall meeting a flat floor.
+                AddFacet(floor, at(false, kMetroWallNear, kMetroWalkway),
+                         at(true, kMetroWallNear, kMetroWalkway),
+                         at(true, kMetroPlatformEdge * -0.4f, kMetroWalkway),
+                         at(false, kMetroPlatformEdge * -0.4f, kMetroWalkway), inside,
+                         Vec2(u0, 0.0f), Vec2(u1, 0.6f));
+                AddFacet(floor, at(false, kMetroPlatformEdge * -0.4f, kMetroTrackBed),
+                         at(true, kMetroPlatformEdge * -0.4f, kMetroTrackBed),
+                         at(true, kMetroPlatformEdge * -0.4f, kMetroWalkway),
+                         at(false, kMetroPlatformEdge * -0.4f, kMetroWalkway), inside,
+                         Vec2(u0, 0.0f), Vec2(u1, 0.15f));
+
+                // The two running rails, and a continuous lit strip under the roof. The strip is a
+                // strip rather than discrete fittings because from the only place anyone ever sees
+                // it -- directly underneath, at 20 m/s -- tube lighting is what it reads as, and
+                // fittings would cost a draw call per station.
+                MeshData& rails = meshFor(mid, CityMaterial::MetroRail);
+                for (const float t : {-0.72f, 0.72f})
+                    AddFacet(rails, at(false, t - 0.075f, kMetroRailTop),
+                             at(true, t - 0.075f, kMetroRailTop),
+                             at(true, t + 0.075f, kMetroRailTop),
+                             at(false, t + 0.075f, kMetroRailTop), inside,
+                             Vec2(travelled - length, 0.0f), Vec2(travelled, 1.0f));
+
+                MeshData& strip = meshFor(mid, CityMaterial::TunnelLight);
+                for (const float t : {-0.9f, kMetroPlatformEdge + 2.2f})
+                    AddFacet(strip, at(false, t - 0.30f, kMetroTunnelRoof - 0.05f),
+                             at(true, t - 0.30f, kMetroTunnelRoof - 0.05f),
+                             at(true, t + 0.30f, kMetroTunnelRoof - 0.05f),
+                             at(false, t + 0.30f, kMetroTunnelRoof - 0.05f), inside,
+                             Vec2(u0 * 2.0f, 0.0f), Vec2(u1 * 2.0f, 1.0f));
+            }
+
+            // Blank walls closing each end of the line, so a passenger on the last train of the
+            // day does not look through the buffers at the sky.
+            for (const std::size_t i : {std::size_t(0), points.size() - 1})
+            {
+                if (line.loop) break;
+                const Vec2 rib = ribs[i];
+                const Vec2 p = points[i];
+                const Vector3 inside = ToWorld(
+                    i == 0 ? points[1] : points[points.size() - 2],
+                    kMetroDepth + (kMetroTunnelRoof + kMetroTrackBed) * 0.5f);
+                MeshData& mesh = meshFor(p, CityMaterial::MetroTunnel);
+                AddFacet(mesh, ToWorld(p + rib * kMetroWallNear, kMetroDepth + kMetroTrackBed),
+                         ToWorld(p + rib * kMetroWallFar, kMetroDepth + kMetroTrackBed),
+                         ToWorld(p + rib * kMetroWallFar, kMetroDepth + kMetroTunnelRoof),
+                         ToWorld(p + rib * kMetroWallNear, kMetroDepth + kMetroTunnelRoof), inside,
+                         Vec2(0.0f, 0.0f), Vec2(2.4f, 1.2f));
+            }
+        }
+
+        // A station is a slab inside the tube, not a box around it. The tunnel is already wide
+        // enough on the platform side to stand a crowd on, so a station adds a platform, its edge,
+        // and nothing that has to join up with anything.
         for (const MetroStation& station : metro.stations())
         {
+            const Vec2 along = station.axis;
+            const Vec2 side = Perp(along);
+            const Vec2 a = station.position - along * kMetroPlatformHalfLength;
+            const Vec2 b = station.position + along * kMetroPlatformHalfLength;
+            const Vector3 inside = ToWorld(station.position,
+                                           kMetroDepth + (kMetroTunnelRoof + kMetroTrackBed) * 0.5f);
+            const float back = kMetroWallFar - 0.05f;
+
             MeshData& mesh = meshFor(station.position, CityMaterial::MetroTunnel);
-            // Platform, and a roof over it for the same reason the running tunnel has one.
-            mesh.AddRibbon(station.position - Vec2(0.0f, 30.0f), station.position + Vec2(0.0f, 30.0f),
-                           9.0f, kMetroDepth - 2.4f, 0.0f, 10.0f, 0.0f, 3.0f);
-            mesh.AddQuad(ToWorld(station.position + Vec2(9.0f, 30.0f), kMetroDepth + 4.0f),
-                         ToWorld(station.position + Vec2(9.0f, -30.0f), kMetroDepth + 4.0f),
-                         ToWorld(station.position + Vec2(-9.0f, -30.0f), kMetroDepth + 4.0f),
-                         ToWorld(station.position + Vec2(-9.0f, 30.0f), kMetroDepth + 4.0f),
-                         Vector3(0.0f, -1.0f, 0.0f), Vec2(0.0f, 0.0f), Vec2(10.0f, 3.0f));
+            // The walking surface is the city's own pavement, which is both correct and free: it
+            // is already a paving texture, and it puts the platform a clear step lighter than the
+            // walls and two steps lighter than the track bed.
+            MeshData& slab = meshFor(station.position, CityMaterial::Pavement);
+            const auto corner = [&](const Vec2& base, float t, float y) {
+                return ToWorld(base + side * t, kMetroDepth + y);
+            };
+            // The platform top, and the edge face a passenger sees from the train.
+            AddFacet(slab, corner(a, kMetroPlatformEdge, kMetroPlatform),
+                     corner(b, kMetroPlatformEdge, kMetroPlatform),
+                     corner(b, back, kMetroPlatform), corner(a, back, kMetroPlatform),
+                     Vector3(inside.X, inside.Y - 6.0f, inside.Z),
+                     Vec2(0.0f, 0.0f), Vec2(kMetroPlatformHalfLength * 0.5f, 1.6f));
+            AddFacet(mesh, corner(a, kMetroPlatformEdge, kMetroTrackBed),
+                     corner(b, kMetroPlatformEdge, kMetroTrackBed),
+                     corner(b, kMetroPlatformEdge, kMetroPlatform),
+                     corner(a, kMetroPlatformEdge, kMetroPlatform), inside,
+                     Vec2(0.0f, 0.0f), Vec2(kMetroPlatformHalfLength * 0.5f, 0.4f));
+            // Both ends of the slab, so it reads as a platform that stops rather than a floor that
+            // is simply missing beyond it.
+            for (const Vec2& endPoint : {a, b})
+                AddFacet(mesh, corner(endPoint, kMetroPlatformEdge, kMetroTrackBed),
+                         corner(endPoint, back, kMetroTrackBed),
+                         corner(endPoint, back, kMetroPlatform),
+                         corner(endPoint, kMetroPlatformEdge, kMetroPlatform), inside,
+                         Vec2(0.0f, 0.0f), Vec2(1.2f, 0.4f));
+
+            // The platform edge's warning line, which is the one thing that says "this is a
+            // platform" from the far end of a train.
+            MeshData& marking = meshFor(station.position, CityMaterial::RoadMarking);
+            AddFacet(marking, corner(a, kMetroPlatformEdge + 0.10f, kMetroPlatform + 0.012f),
+                     corner(b, kMetroPlatformEdge + 0.10f, kMetroPlatform + 0.012f),
+                     corner(b, kMetroPlatformEdge + 0.55f, kMetroPlatform + 0.012f),
+                     corner(a, kMetroPlatformEdge + 0.55f, kMetroPlatform + 0.012f),
+                     Vector3(inside.X, inside.Y - 6.0f, inside.Z),
+                     Vec2(0.0f, 0.0f), Vec2(kMetroPlatformHalfLength * 0.5f, 1.0f));
         }
 
         // ---- Upload ---------------------------------------------------------------------------------
@@ -444,14 +641,26 @@ namespace CnaCity
             const Vec2 min = origin_ + Vec2(static_cast<float>(cx) * chunkSize_,
                                             static_cast<float>(cy) * chunkSize_);
 
-            // The vertical extent is measured from the geometry rather than assumed, so a chunk of
-            // suburbs is not culled against a bound tall enough for downtown.
+            // Measured from the geometry rather than assumed. The vertical extent matters so that
+            // a chunk of suburbs is not culled against a bound tall enough for downtown -- but the
+            // *horizontal* extent matters more, and assuming it was the chunk's own square was a
+            // real bug rather than a conservative approximation. A piece of geometry lands in the
+            // chunk that contains its centre and is free to stick out of it: a metro tunnel
+            // between two stations is four hundred metres of one segment in a three-hundred-metre
+            // chunk. When the chunk holding the middle of that segment left the frustum, the
+            // tunnel around the camera disappeared and the city showed through the hole.
             float highest = 1.0f;
+            Vec2 low(min.X, min.Y);
+            Vec2 high(min.X + chunkSize_, min.Y + chunkSize_);
             for (const MeshData& mesh : staging[c])
                 for (const CityVertex& vertex : mesh.vertices)
+                {
                     highest = std::max(highest, vertex.Position.Y);
-            chunk.bounds = BoundingBox(Vector3(min.X, -18.0f, min.Y),
-                                       Vector3(min.X + chunkSize_, highest + 1.0f, min.Y + chunkSize_));
+                    low = Vec2(std::min(low.X, vertex.Position.X), std::min(low.Y, vertex.Position.Z));
+                    high = Vec2(std::max(high.X, vertex.Position.X), std::max(high.Y, vertex.Position.Z));
+                }
+            chunk.bounds = BoundingBox(Vector3(low.X, -18.0f, low.Y),
+                                       Vector3(high.X, highest + 1.0f, high.Y));
 
             for (int m = 0; m < kCityMaterialCount; ++m)
             {
@@ -476,7 +685,7 @@ namespace CnaCity
                 "asphalt", "pavement", "grass", "glass tower", "concrete office", "brick apartment",
                 "render house", "metal shed", "flat roof", "roof tile", "road marking", "foliage",
                 "bark", "street furniture", "vehicle body", "vehicle glass", "person",
-                "metro tunnel"};
+                "metro tunnel", "metro rail", "tunnel light"};
             for (int m = 0; m < kCityMaterialCount; ++m)
                 if (perMaterial[m] > 0)
                     std::printf("  geometry: %-18s %8d triangles\n", kNames[m], perMaterial[m]);

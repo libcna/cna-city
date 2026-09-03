@@ -109,9 +109,30 @@ namespace CnaCity
 
         /** @brief The agents currently on foot, as indices; the renderer draws exactly these. */
         [[nodiscard]] const std::vector<std::uint32_t>& walkingAgents() const { return walking_; }
+        /** @brief The agents standing on a platform. The renderer draws these too. */
+        [[nodiscard]] const std::vector<std::uint32_t>& waitingAgents() const { return waiting_; }
 
         /** @brief Where an agent is in the world, including its height when it is underground. */
         [[nodiscard]] Microsoft::Xna::Framework::Vector3 AgentWorldPosition(std::uint32_t agent) const;
+
+        /**
+         * @brief Where a camera can stand underground to film @p agent and still be in the tunnel.
+         *
+         * A chase camera placed by stepping backwards along the subject's *heading* works above
+         * ground, where a wrong guess costs a clipped hedge, and does not work below it: a metro
+         * line bends at every station, so ten metres back along the straight line a train is
+         * facing is ten metres into the earth on the outside of the curve, and the shot becomes
+         * the tunnel seen from behind with the city over the top of it. The track knows where it
+         * goes; this walks along it instead.
+         *
+         * @param back    Metres behind the subject, measured along the track.
+         * @param lateral Offset from the track centreline; positive is the platform side.
+         * @param height  Metres above the carriage floor.
+         * @returns False if the agent is not underground, in which case @p out is untouched.
+         */
+        [[nodiscard]] bool MetroCameraPoint(std::uint32_t agent, float back, float lateral,
+                                            float height,
+                                            Microsoft::Xna::Framework::Vector3& out) const;
 
         /** @brief A one-line description of what an agent is doing, for the follow camera's panel. */
         [[nodiscard]] std::string DescribeAgent(std::uint32_t agent) const;

@@ -642,17 +642,25 @@ namespace CnaCity
         plainMaterial(CityMaterial::VehicleBody, Color(240, 240, 240, 255), 0.26f, 0.12f, 0.0f);
         plainMaterial(CityMaterial::VehicleGlass, Color(38, 44, 52, 255), 0.10f, 0.20f, 0.0f);
         plainMaterial(CityMaterial::Person, Color(236, 236, 236, 255), 0.74f, 0.0f, 0.0f);
-        plainMaterial(CityMaterial::MetroTunnel, Color(122, 120, 116, 255), 0.86f, 0.0f, 0.0f);
+        plainMaterial(CityMaterial::MetroTunnel, Color(104, 101, 96, 255), 0.86f, 0.0f, 0.0f);
+        // The floor is its own tone rather than the walls'. With one material for the whole tube
+        // the underground rendered as a single flat wash in which no edge was visible: the sun
+        // does not reach down there and there are no punctual lights to model the corners, so the
+        // only thing that can separate a floor from a wall is albedo.
+        plainMaterial(CityMaterial::MetroFloor, Color(58, 56, 53, 255), 0.94f, 0.0f, 0.0f);
+        plainMaterial(CityMaterial::MetroRail, Color(150, 148, 142, 255), 0.24f, 0.85f, 0.0f);
+        plainMaterial(CityMaterial::TunnelLight, Color(255, 252, 244, 255), 0.30f, 0.0f, 0.0f);
         {
             // The underground is the one place the sun never reaches and the sky cannot light, so
-            // it carries its own. Without this the follow camera takes you down a staircase with a
-            // commuter and shows you a black screen -- the geometry is all there and none of it is
-            // lit by anything.
+            // it carries its own. This is not the tunnel's lighting -- the strips under the roof
+            // are -- it is the bounce off the concrete between them, and it has to stay far below
+            // them or the whole tube self-illuminates into a flat white pipe with no strip visible
+            // in it, which is exactly what 0.20 did.
             Material& tunnel = materials_[static_cast<int>(CityMaterial::MetroTunnel)];
-            Bitmap glow(32, 32, Color(255, 250, 236, 255));
-            AddNoise(glow, rng, 0.03f, 0.06f);
+            Bitmap glow(32, 32, Color(255, 243, 220, 255));
+            AddNoise(glow, rng, 0.05f, 0.09f);
             tunnel.emissive = Adopt(UploadWithMips(device, glow, true));
-            tunnel.constantEmissive = 0.20f;
+            tunnel.constantEmissive = 0.030f;
             tunnel.worldScale = Vec2(6.0f, 6.0f);
         }
     }

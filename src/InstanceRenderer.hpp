@@ -112,6 +112,7 @@ namespace CnaCity
         std::size_t vehicleGlass_[kVehicleKindCount] = {};
         std::size_t personBatch_[3][kWalkPhases][kColorBuckets] = {};
         std::size_t trainBatch_ = 0;
+        std::size_t trainWindowBatch_ = 0;
         std::size_t signalLens_[3] = {};
         std::size_t rainBatch_ = 0;
         std::size_t snowBatch_ = 0;

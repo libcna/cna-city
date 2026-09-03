@@ -112,6 +112,9 @@ namespace CnaCity
         bool mouseLook_ = false;
         bool gpuTiming_ = false;
         bool skyLightRebuiltThisFrame_ = false;
+        /// 0 at street level, 1 once the camera is a few metres under it. Gates everything the sky
+        /// contributes, because a tunnel roof is not something a shadow cascade can express.
+        float undergroundLevel_ = 0.0f;
 
         Microsoft::Xna::Framework::Input::KeyboardState previousKeys_;
         Microsoft::Xna::Framework::Input::MouseState previousMouse_;
@@ -143,6 +146,7 @@ namespace CnaCity
         std::size_t drawnVehicles_ = 0;
         std::size_t drawnProps_ = 0;
         std::size_t drawnParked_ = 0;
+        std::size_t drawnTrainCars_ = 0;
         int frameCount_ = 0;
         std::string rendererName_;
         std::string diagnostic_;

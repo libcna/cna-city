@@ -11,14 +11,60 @@ namespace CnaCity
 {
     class City;
 
-    /** @brief The depth the whole system sits at. Flat: this demo has no gradients underground. */
-    inline constexpr float kMetroDepth = -11.5f;
+    /**
+     * @brief The underground's vertical layout, in metres, relative to rail level.
+     *
+     * Stated in one place because six things have to agree about it and they are in four different
+     * files: the tunnel's floor and roof, the running rails, a carriage's floor and roof, the
+     * platform a waiting passenger stands on, and the camera that follows them down there. The
+     * first version had the tunnel floor 3.2 m below the carriage and the platform level with
+     * neither, so a train ran through the air over a slab nobody was standing on.
+     *
+     * `kMetroDepth` is rail level. Everything else is an offset from it, and the numbers are the
+     * ordinary ones: a platform about a metre above the rail, a carriage floor level with it, and
+     * a tunnel about four metres in the clear.
+     */
+    inline constexpr float kMetroDepth       = -11.5f;
+    inline constexpr float kMetroTrackBed    = -0.28f;  ///< Ballast, under the rails.
+    inline constexpr float kMetroRailTop     = -0.14f;
+    inline constexpr float kMetroCarFloor    =  0.98f;  ///< Level with the platform, as it must be.
+    inline constexpr float kMetroCarRoof     =  3.55f;
+    inline constexpr float kMetroPlatform    =  0.98f;
+    inline constexpr float kMetroTunnelRoof  =  4.30f;
+
+    /**
+     * @brief The tunnel's cross-section, as lateral offsets from the track centreline.
+     *
+     * One cross-section for the whole network, stations included, and that is the point of it. The
+     * first underground was a running tunnel of one width with a wider box dropped over each
+     * station, and every place two differently-shaped boxes met was a seam that leaked daylight
+     * into a tunnel. Widening the tube everywhere and making a station a *slab inside it* removes
+     * the seams by removing the joint: the shell is now one swept tube per line, mitred at the
+     * bends, with nothing to butt against.
+     *
+     * The side away from the platform is a walkway rather than dead space -- which is what the
+     * evacuation walkway beside a real running tunnel is -- and the platform side is wide enough
+     * to stand a crowd on.
+     */
+    inline constexpr float kMetroWallNear    = -3.10f;  ///< Wall opposite the platform.
+    inline constexpr float kMetroWallFar     =  6.60f;  ///< Wall behind the platform.
+    inline constexpr float kMetroPlatformEdge = 1.75f;  ///< Where the platform starts.
+    inline constexpr float kMetroWalkway     =  0.30f;  ///< Height of the walkway beside the track.
+    inline constexpr float kMetroPlatformHalfLength = 42.0f;
+
+    /// Kept for the follow camera and the crowd, which only need to know how far from the
+    /// centreline they may stand.
+    inline constexpr float kMetroHalfWidth   =  3.10f;
 
     inline constexpr std::uint32_t kNoStation = 0xFFFFFFFFu;
 
     struct MetroStation
     {
-        Vec2 position{0.0f, 0.0f};      ///< The platform centre, directly under @ref entrance.
+        Vec2 position{0.0f, 0.0f};      ///< The track centre, directly under @ref entrance.
+        /// The direction the platform runs, taken from the line through it. Everything about a
+        /// station -- which side the platform is on, where a waiting passenger stands, which way
+        /// the lighting runs -- is measured from this rather than from the world axes.
+        Vec2 axis{1.0f, 0.0f};
         Vec2 entrance{0.0f, 0.0f};      ///< Street level, on the pavement.
         std::uint32_t doorNode = 0;     ///< The road node an arriving pedestrian aims for.
         std::string name;

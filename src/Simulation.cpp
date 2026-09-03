@@ -869,7 +869,20 @@ namespace CnaCity
                 const std::uint32_t station = agents_.metroBoard[agent];
                 ReleaseRoute(agent);
                 agents_.mode[agent] = static_cast<std::uint8_t>(Mode::WaitingTrain);
-                agents_.position[agent] = metro_.stations()[station].position;
+                // Spread along the platform and set back from its edge, rather than all standing
+                // on one point. Forty people at the same coordinate is not a queue, it is a
+                // rendering artefact with a population count.
+                {
+                    const MetroStation& platform = metro_.stations()[station];
+                    const float alongOffset =
+                        (HashFloat(agent, 0x51A7u) * 2.0f - 1.0f) * (kMetroPlatformHalfLength - 3.0f);
+                    const float acrossOffset =
+                        kMetroPlatformEdge + 0.9f +
+                        HashFloat(agent, 0x51A8u) * (kMetroWallFar - kMetroPlatformEdge - 1.6f);
+                    agents_.position[agent] = platform.position + platform.axis * alongOffset +
+                                              Perp(platform.axis) * acrossOffset;
+                    agents_.heading[agent] = Heading(Perp(platform.axis) * -1.0f);
+                }
                 agents_.speed[agent] = 0.0f;
                 agents_.waitTimer[agent] = 0.0f;
                 platformQueue_[station].push_back(agent);
@@ -978,6 +991,17 @@ namespace CnaCity
             const MetroLine& line = lines[train.line];
             agents_.position[agent] = metro_.PointOnLine(train.line, train.position);
             agents_.speed[agent] = train.speed;
+            // A passenger faces the way the train is going. Leaving the heading from the walk that
+            // got them to the station is not cosmetic: the follow camera places itself behind the
+            // subject *along their heading*, so a rider still facing the pavement they came from
+            // put the lens twelve metres sideways -- into the tunnel wall.
+            {
+                const float lookAhead = 6.0f * static_cast<float>(train.direction);
+                const Vec2 ahead = metro_.PointOnLine(
+                    train.line, Clamp(train.position + lookAhead, 0.0f, line.length));
+                const Vec2 delta = ahead - agents_.position[agent];
+                if (LengthSq(delta) > 1e-4f) agents_.heading[agent] = Heading(delta);
+            }
 
             if (train.dwellRemaining <= 0.0f) continue;
             const int servedIndex = Clamp(train.nextStation - train.direction, 0,
@@ -1101,9 +1125,45 @@ namespace CnaCity
     {
         const Vec2 ground = agents_.position[agent];
         const auto mode = static_cast<Mode>(agents_.mode[agent]);
-        if (mode == Mode::WaitingTrain || mode == Mode::Riding)
-            return ToWorld(ground, kMetroDepth);
+        // A passenger stands on the platform, which is a metre above the rail, and rides on a
+        // carriage floor level with it. Putting both at rail level -- which is what this used to
+        // do -- buried them to the waist in the track bed.
+        if (mode == Mode::WaitingTrain) return ToWorld(ground, kMetroDepth + kMetroPlatform);
+        if (mode == Mode::Riding) return ToWorld(ground, kMetroDepth + kMetroCarFloor);
         return ToWorld(ground, 0.0f);
+    }
+
+    bool Simulation::MetroCameraPoint(std::uint32_t agent, float back, float lateral, float height,
+                                      Vector3& out) const
+    {
+        const auto mode = static_cast<Mode>(agents_.mode[agent]);
+        if (mode == Mode::WaitingTrain)
+        {
+            // On a platform there is no curve to fall off: the slab is eighty metres of straight
+            // line, so the shot just steps along it.
+            const std::uint32_t stationIndex = agents_.metroBoard[agent];
+            if (stationIndex >= metro_.stations().size()) return false;
+            const MetroStation& station = metro_.stations()[stationIndex];
+            const Vec2 at = agents_.position[agent] + station.axis * back;
+            out = ToWorld(at, kMetroDepth + kMetroPlatform + height);
+            return true;
+        }
+        if (mode != Mode::Riding) return false;
+
+        const std::uint32_t trainIndex = agents_.metroTrain[agent];
+        if (trainIndex >= metro_.trains().size()) return false;
+        const MetroTrain& train = metro_.trains()[trainIndex];
+        // Backwards along the *track*, which is what "behind the train" means in a tunnel.
+        const float along = train.position - back * static_cast<float>(train.direction);
+        const Vec2 at = metro_.PointOnLine(train.line, along);
+        const Vec2 ahead = metro_.PointOnLine(train.line, along + 3.0f);
+        const Vec2 behind = metro_.PointOnLine(train.line, along - 3.0f);
+        const Vec2 direction = Normalized(ahead - behind);
+        // The side is the tunnel's, not the train's. `Perp` of the line's own direction is the
+        // platform side by construction, and it does not reverse when the train turns round.
+        const Vec2 side = Perp(direction);
+        out = ToWorld(at + side * lateral, kMetroDepth + kMetroCarFloor + height);
+        return true;
     }
 
     std::string Simulation::DescribeAgent(std::uint32_t agent) const

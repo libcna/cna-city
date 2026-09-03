@@ -40,7 +40,10 @@ namespace CnaCity
         VehicleBody,
         VehicleGlass,
         Person,
-        MetroTunnel,
+        MetroTunnel,      ///< Tunnel walls and roof: cast concrete.
+        MetroFloor,       ///< Track bed and walkway: darker, so the tube is not one flat tone.
+        MetroRail,        ///< Running rail: worn steel.
+        TunnelLight,      ///< The lit strip along a tunnel roof; emissive at every hour.
         Count
     };
 

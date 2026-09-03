@@ -6,6 +6,7 @@
 #include "Microsoft/Xna/Framework/Graphics/BlendState.hpp"
 #include "Microsoft/Xna/Framework/Graphics/DepthStencilState.hpp"
 #include "Microsoft/Xna/Framework/Graphics/RasterizerState.hpp"
+#include "MetroNetwork.hpp"
 #include "Rng.hpp"
 
 using namespace Microsoft::Xna::Framework;
@@ -311,11 +312,50 @@ namespace CnaCity
             return mesh;
         }
 
+        /// A carriage, measured from rail level -- see the layout constants in MetroNetwork.hpp.
+        /// The skirt comes down almost to the bogies, the floor is level with a platform, and the
+        /// roof is where a tunnel leaves room for it.
         MeshData BuildTrainCar()
         {
             MeshData mesh;
-            mesh.AddBox(Vec2(0.0f, 0.0f), 0.6f, Vec2(9.0f, 1.35f), 3.0f, 0.0f, Vec2(0.2f, 0.2f),
-                        Vec2(0, 0), true, Vec2(1, 1));
+            mesh.AddBox(Vec2(0.0f, 0.0f), kMetroCarFloor - 0.55f, Vec2(9.0f, 1.35f),
+                        kMetroCarRoof - (kMetroCarFloor - 0.55f), 0.0f, Vec2(0.25f, 0.25f),
+                        Vec2(0, 0), true, Vec2(1, 1), true);
+            // Bogies. Two dark blocks under each end, which is the whole of the difference between
+            // a carriage and a shipping container at the distance anyone sees one from.
+            for (int end = -1; end <= 1; end += 2)
+                mesh.AddBox(Vec2(static_cast<float>(end) * 5.6f, 0.0f), 0.0f, Vec2(1.7f, 1.05f),
+                            kMetroCarFloor - 0.52f, 0.0f, Vec2(1, 1), Vec2(0, 0), true, Vec2(1, 1));
+            return mesh;
+        }
+
+        /// The windows and doors, a centimetre proud of the carriage side and lit from inside. A
+        /// metro carriage is a lit box moving through a dark tunnel and the light is most of what
+        /// you see of one -- but a single lit band eighteen metres long is a fluorescent tube with
+        /// bogies. Panes with pillars between them are what makes it a train, and at the distance
+        /// the follow camera stands they are the only thing that says how fast it is going.
+        MeshData BuildTrainWindows()
+        {
+            MeshData mesh;
+            constexpr int kPanes = 7;
+            constexpr float kPitch = 2.42f;
+            for (int i = 0; i < kPanes; ++i)
+            {
+                const float x = (static_cast<float>(i) - (kPanes - 1) * 0.5f) * kPitch;
+                // Alternating doors and windows: a door is taller and reaches nearly to the floor,
+                // a window sits in the middle of the side. Three doors a side is what a metro
+                // carriage of this length has.
+                const bool door = (i % 3) == 1;
+                const float base = door ? kMetroCarFloor + 0.18f : kMetroCarFloor + 0.66f;
+                const float top = kMetroCarFloor + 1.86f;
+                mesh.AddBox(Vec2(x, 0.0f), base, Vec2(door ? 0.62f : 0.94f, 1.372f), top - base,
+                            0.0f, Vec2(1, 1), Vec2(0, 0), false, Vec2(1, 1));
+            }
+            // A cab window at each end, so the front of a train reads as the front.
+            for (int end = -1; end <= 1; end += 2)
+                mesh.AddBox(Vec2(static_cast<float>(end) * 8.96f, 0.0f), kMetroCarFloor + 0.95f,
+                            Vec2(0.06f, 1.02f), 0.92f, 0.0f, Vec2(1, 1), Vec2(0, 0), false,
+                            Vec2(1, 1));
             return mesh;
         }
     }
@@ -419,7 +459,14 @@ namespace CnaCity
             if (index < batches_.size()) batches_[index].emissiveFloor = 1.35f;
 
         trainBatch_ = AddBatch(device, BuildTrainCar(), CityMaterial::StreetFurniture,
-                               Vector3(0.72f, 0.74f, 0.78f), false);
+                               Vector3(0.74f, 0.76f, 0.80f), true);
+        // A very small floor, standing in for the tunnel's strip lighting falling on the flank of
+        // a carriage. There are no punctual lights in this renderer -- see CNA-FINDINGS A1 -- so
+        // without it a train in a tunnel is a black silhouette with lit windows floating in it.
+        if (trainBatch_ < batches_.size()) batches_[trainBatch_].emissiveFloor = 0.055f;
+        trainWindowBatch_ = AddBatch(device, BuildTrainWindows(), CityMaterial::TunnelLight,
+                                     Vector3(1.0f, 0.97f, 0.88f), true);
+        if (trainWindowBatch_ < batches_.size()) batches_[trainWindowBatch_].emissiveFloor = 0.34f;
         // Precipitation is emissive so it stays visible against a dark wet street at night, which
         // is exactly the frame it matters most in.
         rainBatch_ = AddBatch(device, BuildRainStreak(), CityMaterial::VehicleGlass,
@@ -462,6 +509,8 @@ namespace CnaCity
     void InstanceRenderer::AddTrain(const Matrix& world)
     {
         if (trainBatch_ < batches_.size()) batches_[trainBatch_].instances.push_back(world);
+        if (trainWindowBatch_ < batches_.size())
+            batches_[trainWindowBatch_].instances.push_back(world);
     }
 
     void InstanceRenderer::AddSignalLens(std::uint8_t colour, const Matrix& world)
