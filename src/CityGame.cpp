@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 #include "Palette.hpp"
 #include "CNA/Graphics/RenderPipelineSettings.hpp"
@@ -262,6 +263,10 @@ namespace CnaCity
             }
         }
 
+        // Ambient light from the sky the frame is actually drawing, rather than from a constant.
+        if (!skyLight_.Build(device) && diagnostic_.empty())
+            diagnostic_ = skyLight_.diagnostic();
+
         sky_ = std::make_unique<AtmosphericSky>(device);
         if (!sky_->isSupported())
         {
@@ -273,6 +278,34 @@ namespace CnaCity
         if (!instances_.instancingSupported() && !instances_.diagnostic().empty())
             diagnostic_ = instances_.diagnostic();
 
+        // The level tables. `LodGroupEXT` owns the *selection* -- a sorted distance list and a
+        // binary search -- while the meshes it would normally hand back are owned per colour
+        // bucket by InstanceRenderer, so every level here is registered with a null part and the
+        // index is what gets used.
+        //
+        // Hysteresis stays at zero, deliberately. It is per-object state: the group remembers the
+        // level it last returned so a single object hovering on a boundary does not flicker. One
+        // group shared by a hundred thousand pedestrians would carry the previous agent's level
+        // into the next agent's decision, which is not damping, it is noise.
+        personLod_.clear();
+        personLod_.addLevel(65.0f, nullptr);      // Near: legs, arms, a walk cycle
+        personLod_.addLevel(230.0f, nullptr);     // Mid: torso and head
+        personLod_.addLevel(620.0f, nullptr);     // Far: one box
+        personLod_.setHysteresis(0.0f);
+        vehicleLod_.clear();
+        vehicleLod_.addLevel(900.0f, nullptr);
+        vehicleLod_.setHysteresis(0.0f);
+        {
+            const float propRange[kPropKindCount] = {330.0f, 190.0f, 520.0f, 520.0f,
+                                                     140.0f, 110.0f, 260.0f, 300.0f};
+            for (int kind = 0; kind < kPropKindCount; ++kind)
+            {
+                propLod_[kind].clear();
+                propLod_[kind].addLevel(propRange[kind], nullptr);
+                propLod_[kind].setHysteresis(0.0f);
+            }
+        }
+
         camera_.aspect = static_cast<float>(device.getViewportProperty().getWidthProperty()) /
                          std::max(1.0f, static_cast<float>(device.getViewportProperty().getHeightProperty()));
         const float half = sim_.city().config().halfSize;
@@ -283,6 +316,7 @@ namespace CnaCity
     void CityGame::UnloadContent()
     {
         debug_.reset();
+        skyLight_.Release();
         prepass_.reset();
         sky_.reset();
         shadows_.reset();
@@ -312,6 +346,14 @@ namespace CnaCity
         if (pressed(Keys::P)) paused_ = !paused_;
         if (pressed(Keys::F1)) hudVisible_ = !hudVisible_;
         if (pressed(Keys::F2)) postProcessing_ = !postProcessing_;
+        if (pressed(Keys::F3) && pipeline_ != nullptr)
+        {
+            // GPU timing is off by default because it costs a query per pass and, on a driver
+            // without disjoint timer queries, silently reports nothing. It is a key rather than a
+            // setting so the cost is only paid while somebody is looking at the numbers.
+            gpuTiming_ = !gpuTiming_;
+            pipeline_->setGpuTimingEnabledEXT(gpuTiming_);
+        }
         if (pressed(Keys::Tab))
             overlay_ = static_cast<Overlay>((static_cast<int>(overlay_) + 1) %
                                             static_cast<int>(Overlay::Count));
@@ -607,6 +649,14 @@ namespace CnaCity
             sky_->setIntensity(0.014f + 0.075f * day * (1.0f - 0.5f * sim_.weather().cloudiness()));
         }
 
+        // The environment is rebuilt only when the sky has moved enough to matter; `Update`
+        // decides that for itself and reports whether it did anything.
+        skyLightRebuiltThisFrame_ = skyLight_.Update(
+            getGraphicsDeviceProperty(), sunDirection,
+            Clamp(sim_.weather().turbidity(), 1.8f, 5.5f), day, sim_.weather().cloudiness(),
+            sim_.clock().StreetLightLevel());
+        if (skyLight_.valid()) effect_->setImageBasedLightEXT(skyLight_.light());
+
         auto& light0 = effect_->getDirectionalLight0Property();
         light0.setEnabledProperty(true);
         light0.setDirectionProperty(sun_.Direction);
@@ -640,9 +690,21 @@ namespace CnaCity
         effect_->setFogEnabledProperty(true);
         effect_->setFogStartProperty(Clamp(camera_.farPlane * (0.62f - 0.50f * fogStrength), 60.0f, 3000.0f));
         effect_->setFogEndProperty(camera_.farPlane * (1.45f - 0.55f * fogStrength));
-        const float fogDay = Saturate(day * 1.15f);
-        effect_->setFogColorProperty(Vector3(0.04f + 0.36f * fogDay, 0.05f + 0.41f * fogDay,
-                                              0.07f + 0.52f * fogDay));
+        if (skyLight_.valid())
+        {
+            // The horizon's own colour, from the same samples the ambient came from. Two
+            // separately tuned constants for "what the sky looks like" and "what distance fades
+            // into" agree until somebody edits one of them.
+            const Vector3 horizon = skyLight_.horizonColor();
+            effect_->setFogColorProperty(Vector3(Saturate(horizon.X), Saturate(horizon.Y),
+                                                  Saturate(horizon.Z)));
+        }
+        else
+        {
+            const float fogDay = Saturate(day * 1.15f);
+            effect_->setFogColorProperty(Vector3(0.04f + 0.36f * fogDay, 0.05f + 0.41f * fogDay,
+                                                  0.07f + 0.52f * fogDay));
+        }
 
         if (pipeline_ != nullptr)
         {
@@ -740,20 +802,10 @@ namespace CnaCity
 
         // Props: the draw distance is per kind, because a lamp column two hundred metres away is
         // one pixel wide and a tree at the same distance is a hundred.
-        const float propRangeSq[kPropKindCount] = {
-            330.0f * 330.0f,   // StreetLamp
-            190.0f * 190.0f,   // TrafficSignal
-            520.0f * 520.0f,   // TreeRound
-            520.0f * 520.0f,   // TreeConifer
-            140.0f * 140.0f,   // Bench
-            110.0f * 110.0f,   // Bin
-            260.0f * 260.0f,   // BusShelter
-            300.0f * 300.0f    // MetroEntrance
-        };
         for (const Prop& prop : sim_.city().props())
         {
             const float d2 = distanceSq(prop.position);
-            if (d2 > propRangeSq[static_cast<int>(prop.kind)]) continue;
+            if (propLod_[static_cast<int>(prop.kind)].selectIndex(std::sqrt(d2)) < 0) continue;
             const BoundingBox bounds(Vector3(prop.position.X - 3.0f, -0.5f, prop.position.Y - 3.0f),
                                       Vector3(prop.position.X + 3.0f, 9.0f, prop.position.Y + 3.0f));
             if (!culler_.isVisible(bounds)) continue;
@@ -778,7 +830,7 @@ namespace CnaCity
             Vec2 position(0.0f, 0.0f);
             float heading = 0.0f;
             sim_.traffic().Placement(sim_.city(), vehicle, position, heading);
-            if (distanceSq(position) > 900.0f * 900.0f) continue;
+            if (vehicleLod_.selectIndex(std::sqrt(distanceSq(position))) < 0) continue;
             const BoundingBox bounds(Vector3(position.X - 7.0f, -0.5f, position.Y - 7.0f),
                                       Vector3(position.X + 7.0f, 4.5f, position.Y + 7.0f));
             if (!culler_.isVisible(bounds)) continue;
@@ -796,15 +848,13 @@ namespace CnaCity
         for (std::uint32_t agent : sim_.walkingAgents())
         {
             const Vec2 position = agents.position[agent];
-            const float d2 = distanceSq(position);
-            if (d2 > 620.0f * 620.0f) continue;
+            const int level = personLod_.selectIndex(std::sqrt(distanceSq(position)));
+            if (level < 0) continue;
             const BoundingBox bounds(Vector3(position.X - 0.6f, -0.2f, position.Y - 0.6f),
                                       Vector3(position.X + 0.6f, 2.2f, position.Y + 0.6f));
             if (!culler_.isVisible(bounds)) continue;
 
-            const PersonLod lod = d2 < 65.0f * 65.0f    ? PersonLod::Near
-                                : d2 < 230.0f * 230.0f  ? PersonLod::Mid
-                                                        : PersonLod::Far;
+            const auto lod = static_cast<PersonLod>(level);
             const auto phase = static_cast<std::uint8_t>(
                 static_cast<int>(agents.animationPhase[agent] * 0.62f) & (InstanceRenderer::kWalkPhases - 1));
             instances_.AddPerson(lod, phase, agents.Appearance(agent),
@@ -1130,6 +1180,34 @@ namespace CnaCity
         frameWatch.Start();
         drawCalls_ = 0;
 
+        // The level tables. `LodGroupEXT` owns the *selection* -- a sorted distance list and a
+        // binary search -- while the meshes it would normally hand back are owned per colour
+        // bucket by InstanceRenderer, so every level here is registered with a null part and the
+        // index is what gets used.
+        //
+        // Hysteresis stays at zero, deliberately. It is per-object state: the group remembers the
+        // level it last returned so a single object hovering on a boundary does not flicker. One
+        // group shared by a hundred thousand pedestrians would carry the previous agent's level
+        // into the next agent's decision, which is not damping, it is noise.
+        personLod_.clear();
+        personLod_.addLevel(65.0f, nullptr);      // Near: legs, arms, a walk cycle
+        personLod_.addLevel(230.0f, nullptr);     // Mid: torso and head
+        personLod_.addLevel(620.0f, nullptr);     // Far: one box
+        personLod_.setHysteresis(0.0f);
+        vehicleLod_.clear();
+        vehicleLod_.addLevel(900.0f, nullptr);
+        vehicleLod_.setHysteresis(0.0f);
+        {
+            const float propRange[kPropKindCount] = {330.0f, 190.0f, 520.0f, 520.0f,
+                                                     140.0f, 110.0f, 260.0f, 300.0f};
+            for (int kind = 0; kind < kPropKindCount; ++kind)
+            {
+                propLod_[kind].clear();
+                propLod_[kind].addLevel(propRange[kind], nullptr);
+                propLod_[kind].setHysteresis(0.0f);
+            }
+        }
+
         camera_.aspect = static_cast<float>(device.getViewportProperty().getWidthProperty()) /
                          std::max(1.0f, static_cast<float>(device.getViewportProperty().getHeightProperty()));
         UpdateLighting();
@@ -1296,6 +1374,27 @@ namespace CnaCity
         add("CAMERA %s   TIME x%.0f%s", CameraModeName(cameraMode_),
             static_cast<double>(sim_.clock().timeScale()), paused_ ? "  PAUSED" : "");
         add("QUALITY %s  %s", QualityName(options_.quality), rendererName_.c_str());
+        add("SKY LIGHT  %u REBUILDS  LAST %.2f MS%s", skyLight_.rebuildCount(),
+            skyLight_.lastRebuildMs(), skyLight_.valid() ? "" : "  (unavailable)");
+        if (gpuTiming_ && pipeline_ != nullptr)
+        {
+            const auto& timings = pipeline_->getPassTimingsEXT();
+            if (timings.empty())
+            {
+                add("GPU TIMING  no timer queries on this renderer");
+            }
+            else
+            {
+                add("GPU TIMING (F3)");
+                double total = 0.0;
+                for (const auto& pass : timings)
+                {
+                    add("  %-18s %6.3f MS", pass.Name.c_str(), pass.Milliseconds);
+                    total += pass.Milliseconds;
+                }
+                add("  %-18s %6.3f MS", "post chain total", total);
+            }
+        }
         if (!diagnostic_.empty()) add("NOTE %s", diagnostic_.c_str());
 
         // The follow camera's subject panel. It is the whole reason the mode exists: a number on a
@@ -1370,7 +1469,7 @@ namespace CnaCity
         }
 
         const char* help = "1-5 CAMERA   N NEXT CITIZEN   F WEATHER   T/G CLOCK   TAB OVERLAY   "
-                           "P PAUSE   F1 HUD   F2 POST";
+                           "P PAUSE   F1 HUD   F2 POST   F3 GPU";
         text_.DrawShadowed(*batch_, help, 16,
                            device.getViewportProperty().getHeightProperty() - lineHeight - 10,
                            kScale, RgbaColor(150, 160, 175));

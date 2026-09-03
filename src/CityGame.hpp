@@ -11,6 +11,7 @@
 #include "InstanceRenderer.hpp"
 #include "Materials.hpp"
 #include "Simulation.hpp"
+#include "SkyLighting.hpp"
 #include "TextRenderer.hpp"
 
 #include "CNA/Graphics/AtmosphericSky.hpp"
@@ -19,6 +20,7 @@
 #include "CNA/Graphics/DepthNormalPrepass.hpp"
 #include "CNA/Graphics/DirectionalLightEXT.hpp"
 #include "CNA/Graphics/FrustumCullerEXT.hpp"
+#include "CNA/Graphics/LodGroupEXT.hpp"
 #include "CNA/Graphics/RenderPipeline.hpp"
 #include "Microsoft/Xna/Framework/Game.hpp"
 #include "Microsoft/Xna/Framework/GraphicsDeviceManager.hpp"
@@ -83,6 +85,7 @@ namespace CnaCity
         MaterialLibrary materials_;
         CityGeometry geometry_;
         InstanceRenderer instances_;
+        SkyLighting skyLight_;
         TextRenderer text_;
 
         std::unique_ptr<Microsoft::Xna::Framework::Graphics::SpriteBatch> batch_;
@@ -106,6 +109,8 @@ namespace CnaCity
         bool hudVisible_ = true;
         bool postProcessing_ = true;
         bool mouseLook_ = false;
+        bool gpuTiming_ = false;
+        bool skyLightRebuiltThisFrame_ = false;
 
         Microsoft::Xna::Framework::Input::KeyboardState previousKeys_;
         Microsoft::Xna::Framework::Input::MouseState previousMouse_;
@@ -113,6 +118,13 @@ namespace CnaCity
         /// Per-frame culling results. Kept as members so the vectors are not reallocated sixty
         /// times a second.
         CNA::Graphics::FrustumCullerEXT culler_;
+        /// The engine's own level selector, one per instanced family. A LOD level here is a
+        /// distance and a mesh part; the mesh parts are owned by InstanceRenderer, so these hold
+        /// null at every level and are used purely for the *selection* -- which is the part worth
+        /// having in one place rather than as three hand-written distance comparisons.
+        CNA::Graphics::LodGroupEXT personLod_;
+        CNA::Graphics::LodGroupEXT vehicleLod_;
+        CNA::Graphics::LodGroupEXT propLod_[kPropKindCount];
         std::vector<std::uint32_t> visibleChunks_;
         CNA::Graphics::DirectionalLightEXT sun_;
 

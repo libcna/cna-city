@@ -31,16 +31,16 @@ the lamps *are* real lights, `CNA-FINDINGS.md` says they cannot be. The findings
 
 ## P1 — Make the documentation true
 
-- [ ] **P1.1 GPU timing.** Enable `RenderPipeline::setGpuTimingEnabledEXT` and put the per-pass
+- [x] **P1.1 GPU timing.** Enable `RenderPipeline::setGpuTimingEnabledEXT` and put the per-pass
   timings on the HUD behind a key. *Accept:* the HUD can show a per-pass millisecond breakdown of
   the post chain, or state plainly that this renderer has no timer queries.
-- [ ] **P1.2 Image-based lighting from the real sky.** `AtmosphericSky::radiance` is a static CPU
+- [x] **P1.2 Image-based lighting from the real sky.** `AtmosphericSky::radiance` is a static CPU
   function, so the sky can be sampled into a small cube without rendering one, turned into
   irradiance and prefiltered specular by `EnvironmentProcessor`, and given to
   `PbrEffect::setImageBasedLightEXT`. Rebuilt only when the sun has moved enough to matter.
   *Accept:* ambient colour tracks the sky through the day with no hand-tuned constant, and the
   rebuild cost is on the HUD.
-- [ ] **P1.3 `LodGroupEXT` for people and vehicles.** Replace the hand-rolled distance bands with
+- [x] **P1.3 `LodGroupEXT` for people and vehicles.** Replace the hand-rolled distance bands with
   the engine's own selector. *Accept:* the three person levels and the vehicle draw distance come
   from `LodGroupEXT::select`, and the frame is unchanged.
 - [ ] **P1.4 Correct what cannot be implemented.** `ClusteredForwardEffect` and `ParticleSystem`

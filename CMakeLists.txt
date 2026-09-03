@@ -78,6 +78,7 @@ add_executable(cna-city
     src/MeshBuilder.cpp
     src/Materials.cpp
     src/CityGeometry.cpp
+    src/SkyLighting.cpp
     src/InstanceRenderer.cpp
     src/TextRenderer.cpp
     src/CliOptions.cpp
