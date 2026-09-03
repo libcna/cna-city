@@ -90,6 +90,25 @@ and pins it, `T`/`G` wind the clock, `[`/`]` change the time scale, `P` pauses, 
 which is the only way to capture the raw scene on a machine with nobody in front of it), and `F3`
 turns on GPU timer queries and breaks the post chain down pass by pass.
 
+## Tests
+
+```sh
+cmake --build build -j$(nproc)
+ctest --test-dir build --output-on-failure
+```
+
+Seventy-one cases across twelve suites, weighted towards regression rather than coverage. That is
+deliberate: this program is a benchmark, and **a simulation that quietly stops moving anybody gets
+faster.** Every defect recorded in [`ARCHITECTURE.md`](ARCHITECTURE.md) did exactly that, and three
+of them looked like tuning. The tests are named for the defect rather than for the function —
+`PedestriansActuallyArriveAtALargeTimeScale`, `TheDecisionStrideReachesEveryAgent`,
+`NoPrivateDriverIsGivenABus` — and on their first run they found five more, including every pitched
+roof in the city being wound inside out and the same seed producing a different city at a different
+frame rate.
+
+GoogleTest comes from CNA's own vendored checkout, so there is nothing to fetch. Turn the suite off
+with `-DCNA_CITY_BUILD_TESTS=OFF`.
+
 ## Build
 
 ```sh
@@ -132,14 +151,14 @@ On an AMD Radeon 780M with 16 threads, at a hundred thousand citizens:
 | | |
 |---|---|
 | City generation, from one seed | **24 ms** — 204 km of road, 1 072 blocks, 11 808 buildings |
-| Simulation tick, mean / p99 | **2.54 ms / 4.08 ms** |
-| Of which the metro and the buses | **0.04 ms and 0.19 ms** |
+| Simulation tick, mean / p99 | **2.84 ms / 4.84 ms** |
+| Of which the metro and the buses | **0.04 ms and 0.24 ms** |
 | Frame, street level, 1600x900 high | **11.5 ms (87 fps)** |
 | Frame, city overview, all four shadow cascades | **17.5 ms (57 fps)** |
 | Total resident memory | **under 65 MB** |
 
-**A hundred times the agents costs 8.0 times the tick, not a hundred.** The route cache's hit rate
-*rises* with population — 12% at a thousand agents, 39% at a hundred thousand — because citizens do
+**A hundred times the agents costs 6.6 times the tick, not a hundred.** The route cache's hit rate
+*rises* with population — 11% at a thousand agents, 37% at a hundred thousand — because citizens do
 not have random destinations, they go to the same few thousand doorways.
 
 And which half of the program dominates depends on where the camera is: from four hundred metres up

@@ -63,6 +63,16 @@ of road, 1 072 blocks, 11 808 buildings holding 134 000 residential places and 1
 
 ## 4. Simulation
 
+**The tick is fixed-length, and that is the determinism claim rather than an optimisation.**
+`Step` banks the frame's elapsed time and advances the world in whole ticks of `kMovementStep`, with
+the decision period an exact multiple of it. Before that, three separate things had their own
+relationship to the frame length: the decision pass fired when an accumulator crossed a threshold,
+so it happened at t = 2.0 at one step size and t = 1.5 at another; `WorldClock` accumulated an hour
+as a float, and 2 400 additions of 1/7200 land two seconds away from 1 200 of 1/3600; and the
+weather's fog term reads the hour of day *inside* its own exponential smoothing, so it does not
+compose under subdivision. Each was small, and each was enough to move one citizen's departure
+across a schedule boundary -- which is a different city.
+
 **Struct-of-arrays, and it is not decoration.** The tick touches `position`, `heading` and `speed`
 for the agents that are moving and nothing else. An array-of-structs would pull ninety bytes of
 schedule and route state through the cache for each of them, and the headline number would be ten
@@ -202,21 +212,28 @@ at 30 ticks per second of wall clock and a time scale of 60.
 
 | agents | setup | mean | p99 | worst | decide | walk | crowd | traffic | metro | bus | memory | peak travelling |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 000 | 18 ms | 0.32 ms | 0.41 ms | 2.93 ms | 0.01 | 0.02 | 0.11 | 0.14 | 0.00 | 0.04 | 7.7 MB | 98 |
-| 10 000 | 22 ms | 0.64 ms | 1.05 ms | 3.66 ms | 0.06 | 0.17 | 0.13 | 0.17 | 0.00 | 0.06 | 9.3 MB | 841 |
-| 50 000 | 26 ms | 1.66 ms | 2.74 ms | 6.86 ms | 0.23 | 0.50 | 0.32 | 0.27 | 0.02 | 0.12 | 16.7 MB | 4 087 |
-| 100 000 | 31 ms | 2.54 ms | 4.08 ms | 8.75 ms | 0.43 | 0.62 | 0.44 | 0.40 | 0.04 | 0.19 | 25.8 MB | 8 564 |
+| 1 000 | 23 ms | 0.43 ms | 0.67 ms | 4.60 ms | 0.01 | 0.02 | 0.11 | 0.16 | 0.00 | 0.12 | 7.7 MB | 100 |
+| 10 000 | 22 ms | 0.75 ms | 1.30 ms | 4.87 ms | 0.06 | 0.17 | 0.14 | 0.18 | 0.00 | 0.13 | 9.3 MB | 816 |
+| 50 000 | 25 ms | 1.82 ms | 2.87 ms | 6.60 ms | 0.23 | 0.51 | 0.31 | 0.27 | 0.02 | 0.18 | 16.7 MB | 4 227 |
+| 100 000 | 28 ms | 2.84 ms | 4.84 ms | 15.81 ms | 0.44 | 0.65 | 0.43 | 0.40 | 0.04 | 0.24 | 25.8 MB | 8 586 |
 
-**A hundred times the agents costs 8.0 times the tick.** That is not an accident and it is the most
-interesting number the program produces: the route cache's hit rate *rises* with population -- 12%
-at a thousand agents, 30% at ten thousand, 37% at fifty thousand, 39% at a hundred thousand --
+The tick is about a tenth dearer than it was before the fixed-timestep loop -- 2.84 ms against 2.54
+-- and that is the price of the determinism, paid deliberately. The old loop ran one decision pass
+per *call*, so at the benchmark's two-second step the city thought about itself half as often as it
+did in a 60 fps game, and the amount of work in a simulated hour depended on the frame rate. It now
+runs one pass every two simulated seconds on every machine, which at this step size is the same
+work and at any other is more.
+
+**A hundred times the agents costs 6.6 times the tick.** That is not an accident and it is the most
+interesting number the program produces: the route cache's hit rate *rises* with population -- 11%
+at a thousand agents, 28% at ten thousand, 34% at fifty thousand, 37% at a hundred thousand --
 because citizens do not have uniformly random destinations. They go to the same few thousand
 doorways, and the more of them there are the more often somebody has already made the trip. The
 cost that scales linearly is the movement of the people actually outdoors, and at the morning peak
 that is 9% of the population rather than all of it.
 
 The two transport networks are the cheapest things in the tick and stay that way: the metro is
-0.04 ms and the buses 0.19 ms at a hundred thousand citizens, against 0.40 ms for the cars. Nineteen
+0.04 ms and the buses 0.24 ms at a hundred thousand citizens, against 0.40 ms for the cars. Nineteen
 trains and ninety-four buses is a hundred and thirteen vehicles, and the passengers on them cost
 one pass over the few hundred people actually aboard. The buses cost five times the metro because
 they have five times the stops and their route planner searches every stop within five hundred
@@ -297,3 +314,16 @@ Everything generated — the network, the buildings, the population, every agent
 and schedule — is a pure function of one 64-bit seed through a PCG32 stream, and every subsystem
 draws from its own sub-stream so that adding a draw in one of them does not move every number in
 the others. Two runs at different agent counts are the same city.
+
+The *simulation* is now deterministic too, and it was not until the test suite asked. Three
+separate things made the same seed produce a different city at a different frame rate, and one made
+it produce a different city on a different number of worker threads — the list of citizens who want
+to leave is gathered in parallel with an atomic index, so its order was whichever worker got there
+first, and planning consumes it in order under a budget. `--threads` was deciding who travelled.
+Both are fixed and both are asserted: `DeterminismTests.cpp` runs the same seed at two step sizes
+and at one and eight threads and compares a digest of every agent's position, mode and activity,
+every vehicle's segment and offset, and every train's and bus's position along its line.
+
+What the digest deliberately does not compare is bit-exact floats: positions are quantised to a
+centimetre first, because a test that fails on a compiler flag rather than on a defect is a test
+nobody keeps.

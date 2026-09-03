@@ -96,10 +96,18 @@ namespace CnaCity
         static constexpr float kMovementStep = 0.5f;
         /** @brief The most sub-steps one call will run; beyond this the time scale outruns motion. */
         static constexpr int kMaxSubSteps = 10;
-        /** @brief Simulated seconds between decision passes. See @ref Step. */
-        static constexpr float kDecisionPeriod = 1.5f;
-        /** @brief The most decision passes one call will catch up on. */
-        static constexpr int kMaxDecisionPasses = 6;
+        /**
+         * @brief Simulated seconds between decision passes. See @ref Step.
+         *
+         * An exact multiple of @ref kMovementStep, and now an explicit choice rather than
+         * something that fell out of the frame length. It used to be "the first frame after 1.5 s
+         * had accumulated", which at the benchmark's two-second step meant one pass every two
+         * seconds and at a 60 fps game meant one every 1.5 -- so the rate at which the city
+         * thought about itself depended on how fast it was being drawn. Two seconds keeps the
+         * amount of work the old code happened to do at the default time scale, and does it at the
+         * same rate on every machine.
+         */
+        static constexpr float kDecisionPeriod = 2.0f;
         /** @brief Simulated seconds per weather update. See @ref Step. */
         static constexpr float kWeatherStep = 1.5f;
 
@@ -244,6 +252,12 @@ namespace CnaCity
         std::vector<std::uint8_t> wantsFlag_;
         std::atomic<std::uint32_t> wantsCount_{0};
         std::uint32_t planRotation_ = 0;
+        /// Scratch for putting the parallel gather back into agent order. See RunDecisions.
+        std::vector<std::uint32_t> sortOrder_;
+        std::vector<std::uint32_t> sortAgents_;
+        std::vector<std::uint32_t> sortDestination_;
+        std::vector<std::uint8_t> sortActivity_;
+        std::vector<std::uint8_t> sortFlag_;
         int lastDayReset_ = -1;
         std::vector<std::uint32_t> scratchPath_;
 

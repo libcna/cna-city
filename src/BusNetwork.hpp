@@ -46,6 +46,12 @@ namespace CnaCity
         /// carrying one constant put buses in the overtaking lane of every four-lane road and on
         /// the pavement of every two-lane one.
         std::vector<float> offset;
+        /// Per point, the road node it came from when that node is signalised, or 0xFFFFFFFF.
+        ///
+        /// Carried rather than looked up, because the alternative is a spatial query per bus per
+        /// tick to answer "is there a signal in front of me", and the answer is no for almost all
+        /// of them. It was a third of the whole simulation tick at low populations.
+        std::vector<std::uint32_t> signalNode;
         std::vector<float> distance;             ///< Cumulative distance to each point.
         float length = 0.0f;
         std::uint8_t number = 0;                 ///< What it says on the front of the bus.

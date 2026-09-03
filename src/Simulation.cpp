@@ -705,27 +705,30 @@ namespace CnaCity
         // citizens travel -- a city that is not reproducible across machines, which is most of
         // what the determinism claim is for. A few thousand indices is a sort nobody can measure.
         {
-            const auto begin = wantsToLeave_.begin();
-            std::vector<std::uint32_t> order(wanted);
-            for (std::uint32_t k = 0; k < wanted; ++k) order[k] = k;
-            std::sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) {
-                return wantsToLeave_[a] < wantsToLeave_[b];
-            });
-            std::vector<std::uint32_t> agentsSorted(wanted);
-            std::vector<std::uint32_t> destinationSorted(wanted);
-            std::vector<std::uint8_t> activitySorted(wanted);
-            std::vector<std::uint8_t> flagSorted(wanted);
+            // The scratch is kept rather than allocated: this runs on every decision pass, and
+            // four vectors a pass at the morning peak is four allocations of a few thousand
+            // entries thirty times a simulated minute.
+            sortOrder_.resize(wanted);
+            for (std::uint32_t k = 0; k < wanted; ++k) sortOrder_[k] = k;
+            std::sort(sortOrder_.begin(), sortOrder_.end(),
+                      [&](std::uint32_t a, std::uint32_t b) {
+                          return wantsToLeave_[a] < wantsToLeave_[b];
+                      });
+            sortAgents_.resize(wanted);
+            sortDestination_.resize(wanted);
+            sortActivity_.resize(wanted);
+            sortFlag_.resize(wanted);
             for (std::uint32_t k = 0; k < wanted; ++k)
             {
-                agentsSorted[k] = wantsToLeave_[order[k]];
-                destinationSorted[k] = wantsDestination_[order[k]];
-                activitySorted[k] = wantsActivity_[order[k]];
-                flagSorted[k] = wantsFlag_[order[k]];
+                sortAgents_[k] = wantsToLeave_[sortOrder_[k]];
+                sortDestination_[k] = wantsDestination_[sortOrder_[k]];
+                sortActivity_[k] = wantsActivity_[sortOrder_[k]];
+                sortFlag_[k] = wantsFlag_[sortOrder_[k]];
             }
-            std::copy(agentsSorted.begin(), agentsSorted.end(), begin);
-            std::copy(destinationSorted.begin(), destinationSorted.end(), wantsDestination_.begin());
-            std::copy(activitySorted.begin(), activitySorted.end(), wantsActivity_.begin());
-            std::copy(flagSorted.begin(), flagSorted.end(), wantsFlag_.begin());
+            std::copy(sortAgents_.begin(), sortAgents_.end(), wantsToLeave_.begin());
+            std::copy(sortDestination_.begin(), sortDestination_.end(), wantsDestination_.begin());
+            std::copy(sortActivity_.begin(), sortActivity_.end(), wantsActivity_.begin());
+            std::copy(sortFlag_.begin(), sortFlag_.end(), wantsFlag_.begin());
         }
         const std::uint32_t budget = std::min(wanted, kPlanBudgetPerTick);
         stats_.tripsDeferred = wanted - budget;

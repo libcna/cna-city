@@ -177,6 +177,8 @@ namespace CnaCity
                     route.offset.push_back(NearsideOffset(
                         leg == 0xFFFFFFFFu ? RoadClass::Collector
                                            : roads.segments()[leg].roadClass));
+                    route.signalNode.push_back(roads.nodes()[path[p]].signalised ? path[p]
+                                                                                 : 0xFFFFFFFFu);
                 }
             }
             if (kept.size() < 4 || route.points.size() < 4) continue;
@@ -187,6 +189,7 @@ namespace CnaCity
             {
                 route.points.push_back(route.points.front());
                 route.offset.push_back(route.offset.front());
+                route.signalNode.push_back(route.signalNode.front());
             }
             route.distance.assign(route.points.size(), 0.0f);
             for (std::size_t p = 1; p < route.points.size(); ++p)
@@ -358,12 +361,36 @@ namespace CnaCity
 
     void BusNetwork::Placement(const Bus& bus, Vec2& outPosition, float& outHeading) const
     {
-        const Vec2 at = PointOnRoute(bus.route, bus.position);
-        const Vec2 direction = DirectionOnRoute(bus.route, bus.position);
+        // One search, not four. This is called for every bus every tick to build the occupancy
+        // snapshot, and going through PointOnRoute, DirectionOnRoute and OffsetOnRoute separately
+        // meant four binary searches over the same cold array for one answer -- which for ninety
+        // buses was most of what the bus tick cost. The direction now comes from the located
+        // segment rather than from sampling three metres either side, which is also more correct:
+        // a road polyline's direction is piecewise constant, not smoothed.
+        const BusRoute& r = routes_[bus.route];
+        if (r.points.size() < 2)
+        {
+            outPosition = r.points.empty() ? Vec2(0.0f, 0.0f) : r.points[0];
+            outHeading = 0.0f;
+            return;
+        }
+        float wrapped = std::fmod(bus.position, r.length);
+        if (wrapped < 0.0f) wrapped += r.length;
+        const auto it = std::upper_bound(r.distance.begin(), r.distance.end(), wrapped);
+        const std::size_t i = static_cast<std::size_t>(
+            Clamp(static_cast<int>(it - r.distance.begin()) - 1, 0,
+                  static_cast<int>(r.points.size()) - 2));
+        const float span = r.distance[i + 1] - r.distance[i];
+        const float t = span > 1e-3f ? (wrapped - r.distance[i]) / span : 0.0f;
+
+        const Vec2 at = Lerp(r.points[i], r.points[i + 1], t);
+        const Vec2 delta = r.points[i + 1] - r.points[i];
+        const Vec2 direction = LengthSq(delta) > 1e-6f ? Normalized(delta) : Vec2(1.0f, 0.0f);
+        const float lane = r.offset[i] + (r.offset[i + 1] - r.offset[i]) * t;
         // Driving on the left, like the rest of the city: `Perp` is the vehicle's own right, so
         // negating puts it on the nearside. This has to be the same expression Traffic::Placement
         // uses, sign for sign, or buses come down the oncoming carriageway.
-        outPosition = at - Perp(direction) * OffsetOnRoute(bus.route, bus.position);
+        outPosition = at - Perp(direction) * lane;
         outHeading = Heading(direction);
     }
 
@@ -519,9 +546,26 @@ namespace CnaCity
             // one look like part of the traffic despite not being in the car-following stream.
             // The hold has a ceiling for the same reason the vehicles' does: a bus that waits
             // forever at a signal it has misread takes its whole route's service with it.
-            const Vec2 at = PointOnRoute(bus.route, bus.position);
-            const Vec2 ahead = PointOnRoute(bus.route, bus.position + 11.0f);
-            if (bus.redLightSeconds < 45.0f && !mayProceed(at, ahead))
+            //
+            // The signal is only asked about when there is one to ask about. Every bus used to put
+            // the question every tick, and answering it starts with a nearest-node search over the
+            // road graph -- which for the ninety-odd buses in the city was a third of the entire
+            // simulation tick, spent almost every time to be told there is no junction here.
+            std::uint32_t signalAhead = 0xFFFFFFFFu;
+            {
+                const auto it = std::upper_bound(route.distance.begin(), route.distance.end(),
+                                                 bus.position);
+                const std::size_t next = static_cast<std::size_t>(it - route.distance.begin());
+                if (next < route.signalNode.size() &&
+                    route.distance[next] - bus.position < 14.0f)
+                    signalAhead = route.signalNode[next];
+            }
+            const Vec2 at = signalAhead != 0xFFFFFFFFu ? PointOnRoute(bus.route, bus.position)
+                                                       : Vec2(0.0f, 0.0f);
+            const Vec2 ahead = signalAhead != 0xFFFFFFFFu
+                                   ? PointOnRoute(bus.route, bus.position + 11.0f)
+                                   : Vec2(0.0f, 0.0f);
+            if (signalAhead != 0xFFFFFFFFu && bus.redLightSeconds < 45.0f && !mayProceed(at, ahead))
             {
                 bus.redLightSeconds += dt;
                 bus.speed = std::max(0.0f, bus.speed - kAcceleration * 2.2f * dt);
@@ -655,7 +699,8 @@ namespace CnaCity
         for (const BusStop& stop : stops_)
             bytes += stop.name.capacity() + stop.routes.capacity() * sizeof(stop.routes[0]);
         for (const BusRoute& route : routes_)
-            bytes += route.stops.capacity() * sizeof(std::uint32_t) +
+            bytes += route.signalNode.capacity() * sizeof(std::uint32_t) +
+                     route.stops.capacity() * sizeof(std::uint32_t) +
                      route.stopDistance.capacity() * sizeof(float) +
                      route.points.capacity() * sizeof(Vec2) +
                      route.distance.capacity() * sizeof(float);
