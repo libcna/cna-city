@@ -339,6 +339,33 @@ On an AMD Radeon 780M with 16 threads, at a hundred thousand citizens:
 | Frame, city overview, all four shadow cascades | **17.5 ms (57 fps)** |
 | Total resident memory | **under 65 MB** |
 
+### A million
+
+```sh
+./build/cna-city --bench --agents 1000000 --scales 1000,10000,100000,250000,500000,1000000
+```
+
+| agents | mean tick | memory | outdoors at the peak | trips deferred | route pool exhausted |
+|---:|---:|---:|---:|---:|---:|
+| 100 000 | 3.9 ms | 26 MB | 8 913 | 597 | 0 |
+| 1 000 000 | 47.9 ms | 191 MB | 104 592 | 5 855 | 0 |
+
+**A thousand times the agents costs a hundred and three times the tick.** Nothing fails: no
+allocation throws, the route pool never runs out, the crowd grid never degrades, and memory is
+linear. At a million the simulation alone is 48 ms, so the program stops being real-time — which
+is a useful thing for a benchmark to be able to say exactly rather than approximately.
+
+What *did* stop scaling was a policy rather than a structure: the planner's per-pass budget was a
+flat 320 trips whatever the population, so the share of peak demand it served fell from 35% at a
+hundred thousand to 3.5% at a million. It is per hundred thousand citizens now, and the share is
+35% at both ends. Finding that is what the `deferred` and `poolfull` columns are for — a tick that
+stays cheap because the planner is refusing work has stopped measuring the same thing.
+
+The other limit is the city, and it is not a defect: the default 3.3 km city has homes for 133 911
+people. A million live in it seven and a half to a dwelling, quite happily. `--size 4500` gives a
+9 km city that houses them properly, where the tick is 77 ms because the trips are longer — 185 918
+people in transit at the peak instead of 104 592.
+
 **A hundred times the agents costs 6.6 times the tick, not a hundred.** The route cache's hit rate
 *rises* with population — 11% at a thousand agents, 37% at a hundred thousand — because citizens do
 not have random destinations, they go to the same few thousand doorways.

@@ -490,3 +490,66 @@ questions answered by reading numbers off a HUD and guessing at a place.
 The colour ramp is blue-green-yellow-red rather than a rainbow or a single hue. A rainbow puts its
 brightest band in the middle and makes a mid value read as the extreme; a single hue makes the
 difference between "busy" and "stopped" a shade of the same colour.
+
+---
+
+## P18 — A million citizens, and what actually gives first
+
+The question was which of RAM, the crowd grid, the path cache, the decision pass, the walking pass,
+the rendering or the route pool fails first at ten times the headline population. The answer is
+none of them.
+
+A million agents runs. Nothing throws, nothing is exhausted, nothing degrades non-linearly. What
+happens is that the tick gets proportionally dearer and one *policy* -- not a data structure --
+stops scaling with it.
+
+- [x] **P18.1 Measure it.** 1 000 to 1 000 000 in the 3.3 km city, and 1 000 000 again in a 9 km
+  one that can actually house them. The scaling sweep grew two columns for the question:
+  `deferred`, the peak number of citizens who wanted to leave and were not planned that pass, and
+  `poolfull`, how many times the route pool ran out of slots.
+
+- [x] **P18.2 What gives: the planning budget, and it was a constant.** `poolfull` is zero at every
+  scale -- the pool is sized from the population and 400 000 slots at a million agents is 102 MB
+  that never runs out. Memory is 191 MB reported and 255 MB resident, which is linear. The crowd
+  grid is a hashed 65 536-bucket structure over the people outdoors and never became the cost.
+
+  The budget did. `kPlanBudgetPerTick` was a flat 320 trips per pass whatever the population, so
+  the *share* of demand served fell with scale: 35% of the peak at a hundred thousand, 3.5% at a
+  million. Nothing broke; the city simply took ten times as long to get moving, which turns a
+  benchmark into a measurement of a queue. It is now 320 per hundred thousand citizens, with a
+  floor that leaves the hundred-thousand case byte-identical -- the served share is 35% at both
+  ends, and the peak deferred at a million fell from 8 735 to 5 855.
+
+- [x] **P18.3 The city is the other limit, and it is not a defect.** The default 3.3 km city has
+  homes for 133 911 people. A million of them run in it perfectly well and every one has somewhere
+  to live, seven and a half to a dwelling. `--size 4500` gives a 9 km city that houses them
+  properly; generation scales close to linearly with area (26 ms at 1 650, 174 ms at 4 500), and
+  the *simulation* is dearer there than in the small one because the trips are longer -- 185 918
+  people in transit at the peak against 104 657, and a metro tick of 9.0 ms against 1.5.
+
+### What a million costs
+
+Measured on the machine in [`ARCHITECTURE.md`](ARCHITECTURE.md) §7. The structural columns are
+exact at any load; the millisecond ones were taken while the machine was not idle and the sweep
+does not repeat, so they are an upper bound rather than a best-of.
+
+| agents | mean | p99 | decide | walk | crowd | memory | peak out | deferred | pool full |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 000 | 0.47 ms | 2.07 | 0.01 | 0.02 | 0.13 | 7.7 MB | 104 | 0 | 0 |
+| 10 000 | 0.89 ms | 2.93 | 0.08 | 0.23 | 0.16 | 9.4 MB | 844 | 0 | 0 |
+| 100 000 | 3.93 ms | 9.52 | 0.58 | 1.09 | 0.54 | 25.9 MB | 8 913 | 597 | 0 |
+| 250 000 | 10.83 ms | 48.01 | 1.44 | 3.07 | 1.44 | 53.4 MB | 25 475 | 1 455 | 0 |
+| 500 000 | 23.61 ms | 67.34 | 2.84 | 6.53 | 4.12 | 99.2 MB | 52 391 | 2 929 | 0 |
+| 1 000 000 | 47.90 ms | 93.46 | 5.24 | 14.39 | 10.29 | 191.0 MB | 104 592 | 5 855 | 0 |
+| 1 000 000, 9 km city | 76.71 ms | 144.13 | 10.52 | 19.54 | 12.07 | 198.9 MB | 185 918 | 8 759 | 0 |
+
+**A thousand times the agents costs a hundred and three times the tick**, and the tick is
+proportional to the people *outdoors* rather than to the population: 104 592 of the million are in
+the street at the peak, and 8 913 of the hundred thousand, which is the same tenth. The route
+cache is what keeps the ratio near one rather than above it, and the crowd pass is what pulls it
+above one at the top -- 0.13 ms to 10.29 is eighty times for a thousand times the agents, and it is
+the only line in the table growing faster than the travellers do.
+
+At a million the simulation alone is 48 ms, so the demo is simulation-bound at about twenty ticks a
+second before a frame is drawn. Nothing prevents it running; it is simply no longer a real-time
+program at that size, which is a useful thing for a benchmark to be able to say precisely.
