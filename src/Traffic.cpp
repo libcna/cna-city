@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "Traffic.hpp"
 
+#include "Archive.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -51,6 +53,16 @@ namespace CnaCity
         for (std::uint32_t i = 0; i < vehicleCapacity; ++i)
             freeList_[i] = vehicleCapacity - 1 - i;
         activeCount_ = 0;
+        blockedCount_ = 0;
+        meanSpeed_ = 0.0f;
+        gridlocked_ = 0;
+        // The cycle starts where it started last time. Build left this where the previous run had
+        // wound it, so a second Build on the same object produced a city whose signals were at a
+        // different point in their phase -- nine junctions disagreeing on the first tick, and a
+        // different city by the end of the hour. The per-junction offsets below are hashed from
+        // the node index and were always reproducible; it was only ever the clock they are
+        // measured against.
+        signalClock_ = 0.0f;
         laneOfVehicle_.assign(vehicleCapacity, 0);
         arrivals_.clear();
 
@@ -497,5 +509,25 @@ namespace CnaCity
             vehicle.s = 0.0f;
             agents.pathCursor[driver] = static_cast<std::uint16_t>(cursor + 1);
         }
+    }
+}
+
+namespace CnaCity
+{
+    void Traffic::Serialize(Archive& archive)
+    {
+        archive.Fence(0x7A4F1C00u);
+        archive.Vector(vehicles_);
+        archive.Vector(freeList_);
+        archive.Pod(activeCount_);
+        archive.Pod(blockedCount_);
+        archive.Pod(meanSpeed_);
+        archive.Pod(gridlocked_);
+        archive.Pod(lanesPerDirection_);
+        archive.Vector(signalGroup_);
+        archive.Vector(signalOffset_);
+        archive.Pod(signalClock_);
+        archive.Vector(arrivals_);
+        archive.Fence(0x7A4F1C01u);
     }
 }

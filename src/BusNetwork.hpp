@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "Archive.hpp"
 #include "CityMath.hpp"
 
 namespace CnaCity
@@ -104,6 +105,9 @@ namespace CnaCity
         [[nodiscard]] const std::vector<BusRoute>& routes() const { return routes_; }
         [[nodiscard]] const std::vector<Bus>& buses() const { return buses_; }
         [[nodiscard]] std::vector<Bus>& mutableBuses() { return buses_; }
+
+        /** @brief Reads or writes the fleet. The routes and stops come from the seed. */
+        void Serialize(Archive& archive) { archive.Vector(buses_); }
 
         /** @brief The world position of a point @p metres round @p route. */
         [[nodiscard]] Vec2 PointOnRoute(std::uint32_t route, float distance) const;

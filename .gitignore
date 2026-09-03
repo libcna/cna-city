@@ -33,3 +33,8 @@ CMakeFiles/
 # OS cruft.
 .DS_Store
 Thumbs.db
+
+# Benchmark scenarios: twenty megabytes each, and regenerable from the seed in
+# a couple of minutes by scripts/make-scenarios.sh. A snapshot stores what
+# cannot be recomputed, and a git history is not the place for what can.
+/bench-results/scenarios/

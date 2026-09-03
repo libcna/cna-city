@@ -3,6 +3,7 @@
 
 #include "Checksum.hpp"
 #include "Replay.hpp"
+#include "Snapshot.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -43,8 +44,18 @@ namespace CnaCity
             return static_cast<double>(watch.getElapsedTicksProperty()) / 10000.0;
         }
 
+        /**
+         * @brief Measures @p simulatedHours of the city.
+         *
+         * @param snapshot When set, the measurement starts from that moment instead of from an
+         *        empty morning. A benchmark of the peak has to simulate up to the peak first, and
+         *        at a hundred thousand citizens that is twenty-five seconds of warm-up before the
+         *        first number -- paid again for every scale and every run. Loading it is a quarter
+         *        of a second. The snapshot fixes the population, so a sweep and a snapshot are
+         *        mutually exclusive and the caller is told so rather than given a surprise.
+         */
         ScaleResult RunOneScale(const SimConfig& base, std::uint32_t agents, float simulatedHours,
-                                bool verbose)
+                                bool verbose, const std::string& snapshot = std::string())
         {
             SimConfig config = base;
             config.agentCount = agents;
@@ -52,7 +63,21 @@ namespace CnaCity
             Simulation sim;
             System::Diagnostics::Stopwatch watch;
             watch.Start();
-            sim.Initialize(config);
+            if (snapshot.empty())
+            {
+                sim.Initialize(config);
+            }
+            else
+            {
+                std::string error;
+                if (!LoadSnapshot(snapshot, sim, error))
+                {
+                    std::fprintf(stderr, "cna-city: %s\n", error.c_str());
+                    return ScaleResult{};
+                }
+                config = sim.config();
+                agents = config.agentCount;
+            }
             watch.Stop();
 
             ScaleResult result;
@@ -115,6 +140,59 @@ namespace CnaCity
             result.gridlocked = sim.traffic().gridlockedCount();
             return result;
         }
+        /**
+         * @brief Starts @p sim from `--load` if one was given, and from the seed otherwise.
+         *
+         * A snapshot carries its own configuration, so loading one overrides the command line --
+         * a snapshot is a moment in a particular city and there is no such thing as loading it
+         * into a different one. Anything on the command line that would change the city is
+         * therefore ignored, and saying so is better than quietly producing a third thing.
+         */
+        bool StartSimulation(Simulation& sim, const CliOptions& options, bool announce = true)
+        {
+            if (options.loadPath.empty())
+            {
+                sim.Initialize(options.sim);
+                return true;
+            }
+            std::string error;
+            if (!LoadSnapshot(options.loadPath, sim, error))
+            {
+                std::fprintf(stderr, "cna-city: %s\n", error.c_str());
+                return false;
+            }
+            SnapshotInfo info;
+            if (announce && ReadSnapshotInfo(options.loadPath, info, error))
+                std::printf("cna-city: loaded %s -- %u citizens at %02d:%02d on day %d%s%s\n",
+                            options.loadPath.c_str(), info.config.agentCount,
+                            static_cast<int>(info.hour),
+                            static_cast<int>(info.hour * 60.0f) % 60, info.day,
+                            info.note.empty() ? "" : ", ", info.note.c_str());
+            return true;
+        }
+
+        /// Writes a snapshot if `--save` was given. Reports rather than fails the run.
+        void FinishSimulation(const Simulation& sim, const CliOptions& options)
+        {
+            if (options.savePath.empty()) return;
+            std::string error;
+            if (SaveSnapshot(options.savePath, sim, options.snapshotNote, error))
+                std::printf("cna-city: wrote %s\n", options.savePath.c_str());
+            else
+                std::fprintf(stderr, "cna-city: %s\n", error.c_str());
+        }
+
+        /// Steps @p sim for @p seconds in slices of @p slice, recording as it goes.
+        void SimulateFor(Simulation& sim, float seconds, float slice, ReplayRecorder* recorder,
+                         std::uint64_t checkpointInterval)
+        {
+            const auto steps = static_cast<int>(seconds / slice);
+            for (int i = 0; i < steps; ++i)
+            {
+                sim.Step(slice);
+                if (recorder != nullptr) recorder->MaybeCheckpoint(sim, checkpointInterval);
+            }
+        }
     }
 
     int RunHeadless(const CliOptions& options)
@@ -122,7 +200,7 @@ namespace CnaCity
         Simulation sim;
         System::Diagnostics::Stopwatch watch;
         watch.Start();
-        sim.Initialize(options.sim);
+        if (!StartSimulation(sim, options)) return 2;
         watch.Stop();
 
         const City& city = sim.city();
@@ -140,7 +218,8 @@ namespace CnaCity
         std::printf("  setup     %.0f ms on %d threads, %.1f MB\n\n", ElapsedMs(watch),
                     sim.threadCount(), static_cast<double>(sim.MemoryBytes()) / (1024.0 * 1024.0));
 
-        const ScaleResult result = RunOneScale(options.sim, options.sim.agentCount, 24.0f, true);
+        const ScaleResult result =
+            RunOneScale(options.sim, options.sim.agentCount, 24.0f, true, options.loadPath);
         std::printf("\n  mean %.2f ms, p99 %.2f ms, worst %.2f ms over a simulated day\n",
                     result.meanMs, result.p99Ms, result.worstMs);
         std::printf("  peak travelling %u, %llu route queries (%.0f%% cached), %llu gridlock give-ups\n",
@@ -150,25 +229,10 @@ namespace CnaCity
         return 0;
     }
 
-    namespace
-    {
-        /// Steps @p sim for @p seconds in slices of @p slice, recording as it goes.
-        void SimulateFor(Simulation& sim, float seconds, float slice, ReplayRecorder* recorder,
-                         std::uint64_t checkpointInterval)
-        {
-            const auto steps = static_cast<int>(seconds / slice);
-            for (int i = 0; i < steps; ++i)
-            {
-                sim.Step(slice);
-                if (recorder != nullptr) recorder->MaybeCheckpoint(sim, checkpointInterval);
-            }
-        }
-    }
-
     int RunChecksum(const CliOptions& options)
     {
         Simulation sim;
-        sim.Initialize(options.sim);
+        if (!StartSimulation(sim, options)) return 2;
 
         ReplayRecorder recorder;
         ReplayRecorder* recording = nullptr;
@@ -185,9 +249,14 @@ namespace CnaCity
         const float slice = options.sim.timeScale / kTickHz;
         SimulateFor(sim, options.simulateSeconds, slice, recording, options.checkpointInterval);
         const WorldChecksum digest = ComputeChecksum(sim);
+        FinishSimulation(sim, options);
 
+        // From the simulation rather than from the command line: with --load the configuration
+        // comes out of the file, and printing the seed that was not used is how a digest ends up
+        // filed against the wrong city.
         std::printf("cna-city checksum -- seed %llu, %u agents, %.1f simulated hours, %llu ticks\n\n",
-                    static_cast<unsigned long long>(options.sim.city.seed), options.sim.agentCount,
+                    static_cast<unsigned long long>(sim.config().city.seed),
+                    sim.config().agentCount,
                     static_cast<double>(options.simulateSeconds) / 3600.0,
                     static_cast<unsigned long long>(sim.tick()));
         std::printf("CITY      %s\n", ToHex(digest.city).c_str());
@@ -215,19 +284,25 @@ namespace CnaCity
         std::printf("\nreproduced");
         bool ok = true;
         {
-            SimConfig halfStep = options.sim;
             Simulation other;
-            other.Initialize(halfStep);
+            if (!StartSimulation(other, options, false)) return 2;
             SimulateFor(other, options.simulateSeconds, slice * 0.5f, nullptr, 0);
             const bool same = ComputeChecksum(other) == digest;
             ok = ok && same;
             std::printf("\n  at half the step size            %s", same ? "yes" : "NO");
         }
         {
-            SimConfig threaded = options.sim;
-            threaded.threads = options.sim.threads == 1 ? 4 : 1;
+            // One Initialize, not two: generating the city twice to change one integer is a
+            // second's work thrown away, and it was also what exposed Initialize not resetting
+            // everything it should.
             Simulation other;
-            other.Initialize(threaded);
+            CliOptions threaded = options;
+            threaded.sim.threads = sim.threadCount() == 1 ? 4 : 1;
+            if (!StartSimulation(other, threaded, false)) return 2;
+            // A snapshot carries the thread count it was taken with, and loading it puts that back
+            // -- so the override goes on afterwards, and without rebuilding the world it would
+            // otherwise throw away.
+            other.SetThreadCount(threaded.sim.threads);
             SimulateFor(other, options.simulateSeconds, slice, nullptr, 0);
             const bool same = ComputeChecksum(other) == digest;
             ok = ok && same;
@@ -286,6 +361,11 @@ namespace CnaCity
 
     int RunBenchmark(const CliOptions& options)
     {
+        if (!options.loadPath.empty() && options.benchScales.size() > 1)
+            std::fprintf(stderr,
+                         "cna-city: --load pins the population, so --scales is ignored. Measure a "
+                         "sweep from the seed, or one scenario from a snapshot.\n");
+
         std::printf("cna-city benchmark -- simulation only, no graphics device\n");
         std::printf("seed %llu, %.1f km city, time scale %.0f, %d threads\n\n",
                     static_cast<unsigned long long>(options.sim.city.seed),
@@ -299,7 +379,7 @@ namespace CnaCity
             std::printf("  %u agents...\n", agents);
             // Six simulated hours starting at half past six covers the morning peak, which is the
             // only part of the day where the numbers are interesting.
-            results.push_back(RunOneScale(options.sim, agents, 6.0f, false));
+            results.push_back(RunOneScale(options.sim, agents, 6.0f, false, options.loadPath));
         }
 
         std::printf("\n%-9s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %9s\n", "agents", "setup",

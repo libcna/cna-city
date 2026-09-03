@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "Archive.hpp"
 #include "CityMath.hpp"
 
 namespace CnaCity
@@ -116,6 +117,9 @@ namespace CnaCity
         [[nodiscard]] const std::vector<MetroLine>& lines() const { return lines_; }
         [[nodiscard]] const std::vector<MetroTrain>& trains() const { return trains_; }
         [[nodiscard]] std::vector<MetroTrain>& mutableTrains() { return trains_; }
+
+        /** @brief Reads or writes the trains. The lines and stations come from the seed. */
+        void Serialize(Archive& archive) { archive.Vector(trains_); }
 
         /** @brief The world position of a point @p metres along @p line. */
         [[nodiscard]] Vec2 PointOnLine(std::uint32_t line, float distance) const;

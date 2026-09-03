@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "Agents.hpp"
+#include "Archive.hpp"
 #include "BusNetwork.hpp"
 #include "City.hpp"
 #include "JobSystem.hpp"
@@ -127,6 +128,15 @@ namespace CnaCity
         [[nodiscard]] const RoutePool& routes() const { return routes_; }
         [[nodiscard]] int threadCount() const { return jobs_ != nullptr ? jobs_->threadCount() : 1; }
 
+        /**
+         * @brief Rebuilds the worker pool without touching the world.
+         *
+         * A snapshot carries the thread count it was taken with, and "does this still reproduce on
+         * one worker" is a question that has to be asked *of the loaded moment* rather than of a
+         * fresh city. Initialize would answer it by throwing the moment away.
+         */
+        void SetThreadCount(int threads);
+
         /** @brief The agents currently on foot, as indices; the renderer draws exactly these. */
         [[nodiscard]] const std::vector<std::uint32_t>& walkingAgents() const { return walking_; }
         /** @brief The agents standing on a platform. The renderer draws these too. */
@@ -177,6 +187,16 @@ namespace CnaCity
          */
         [[nodiscard]] std::uint32_t PickInterestingAgent(std::uint32_t hint,
                                                          Focus focus = Focus::Anybody) const;
+
+        /**
+         * @brief Reads or writes everything a snapshot needs, except the static city.
+         *
+         * The city is not here on purpose. It is a pure function of the seed, so storing it would
+         * be storing something recomputable -- and the file records the city's digest instead, so
+         * a snapshot taken against a different generator is *refused* rather than loaded into a
+         * world whose roads have moved under its traffic.
+         */
+        void Serialize(Archive& archive);
 
         /** @brief Estimated resident memory of the simulation, for the HUD. */
         [[nodiscard]] std::size_t MemoryBytes() const;

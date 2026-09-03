@@ -119,7 +119,27 @@ namespace CnaCity
 
     void City::Generate(const CityConfig& config)
     {
+        // Everything the generator owns, cleared in one place before any of it runs.
+        //
+        // The stages used to clear their own outputs, each of them except one: park planting
+        // appends to `props_` while the blocks are being built, so `GenerateProps` deliberately
+        // does not clear it -- and nothing else did either. Generating twice into the same City
+        // therefore produced a city with two of every lamp post, and after the road graph had been
+        // rebuilt around them, two of every tree in places there was no longer a park. It was
+        // invisible for as long as nothing generated twice, and `Simulation::Initialize` began
+        // doing exactly that the day it grew a caller that wanted a second world to compare
+        // against.
         config_ = config;
+        districts_.clear();
+        buildings_.clear();
+        props_.clear();
+        parked_.clear();
+        homes_.clear();
+        workplaces_.clear();
+        leisure_.clear();
+        residentCapacity_ = 0;
+        jobCapacity_ = 0;
+
         Rng root(config.seed);
 
         Rng districtRng = root.Split(StreamDistricts);

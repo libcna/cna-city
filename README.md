@@ -166,6 +166,37 @@ DIVERGED at tick 50004, in the agents
 `--replay FILE --threads 1` re-runs a recording on a different number of workers, which is how the
 arrival-queue defect above was pinned to a tick.
 
+## Snapshots and scenarios
+
+```sh
+./build/cna-city --headless --time 5.0 --simulate 2h --save morning.snapshot --note "07:00"
+./build/cna-city --bench --load morning.snapshot          # measure the peak, no warm-up
+./build/cna-city --load morning.snapshot                  # or just look at it
+```
+
+Measuring the morning peak means simulating up to the morning peak first, and at a hundred thousand
+citizens that is **25 seconds** of warm-up before the first number — paid again for every scale,
+every renderer and every run. Loading the same moment takes **0.27 s**.
+
+A snapshot stores what cannot be recomputed and nothing else: the population, the traffic, the two
+fleets, the clock, the weather, every random generator's state and the queues on the platforms. The
+streets, the buildings, the metro lines and the bus routes are a pure function of the seed, so what
+the file keeps of them is a *digest* — and a snapshot taken against a generator that has since
+changed is refused rather than loaded into a world whose roads have moved under its traffic.
+
+`scripts/make-scenarios.sh` builds the set:
+
+| scenario | what it is |
+|---|---|
+| `empty-night` | 02:00, almost nobody out |
+| `morning-rush` | 07:00, the peak building |
+| `evening-rush` | 17:30 |
+| `rain-gridlock` | 09:00 in the rain, with the roads at their worst |
+| `metro-peak` | 08:00 with car ownership at 15%, so the underground carries the city |
+
+They are 20 MB each and are not in git: they are regenerable, and a git history is not the place for
+what can be recomputed.
+
 ## Build
 
 ```sh

@@ -59,6 +59,9 @@ namespace CnaCity
         bool followBus = false;
         /// Simulated seconds for --checksum and --record. Accepts "24h", "90m", "600s" or hours.
         float simulateSeconds = 24.0f * 3600.0f;
+        std::string savePath;     ///< --save: write a snapshot when the run ends.
+        std::string loadPath;     ///< --load: start from a snapshot instead of from hour zero.
+        std::string snapshotNote; ///< --note: free text stored in the snapshot header.
         std::string recordPath;   ///< --record: write a replay of this run here.
         std::string replayPath;   ///< --replay: re-run this file and check it.
         /// Whether --threads was named. A replay takes its thread count from the file unless the

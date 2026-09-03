@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "Archive.hpp"
+
 #include <cstdint>
 
 namespace CnaCity
@@ -113,6 +115,21 @@ namespace CnaCity
 
         /** @brief A normal deviate with the given mean and standard deviation. */
         float NextGaussian(float mean, float stddev) { return mean + stddev * NextGaussian(); }
+
+        /**
+         * @brief Reads or writes the generator's whole state.
+         *
+         * A snapshot that restored everything except the random streams would produce a world that
+         * continued differently from the one that was saved -- which is the one thing a snapshot
+         * must not do, because the point of it is to start a measurement from a known place.
+         */
+        void Serialize(Archive& archive)
+        {
+            archive.Pod(state_);
+            archive.Pod(inc_);
+            archive.Pod(spare_);
+            archive.Pod(hasSpare_);
+        }
 
     private:
         static float SqrtNegTwoLogOver(float s);

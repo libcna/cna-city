@@ -115,9 +115,27 @@ namespace CnaCity
 
         Populate();
         CollectModeLists(true);
+
+        // Every counter, not just the obvious three. Initialize used to reset the tick, the clock
+        // and the epoch and leave the decision pass, the step accumulator, the planning rotation
+        // and the day-rollover marker where the previous run had left them -- which was invisible
+        // while nothing called it twice, and became a city that depended on what the same object
+        // had simulated before the moment something did. It was found by the --checksum
+        // self-check, which initialises a second simulation to compare against.
         tick_ = 0;
         simulatedSeconds_ = 0.0;
         decisionEpoch_ = 0;
+        decisionPass_ = 0;
+        stepAccumulator_ = 0.0;
+        planRotation_ = 0;
+        lastDayReset_ = -1;
+        stats_ = SimStats{};
+    }
+
+    void Simulation::SetThreadCount(int threads)
+    {
+        config_.threads = threads;
+        jobs_ = std::make_unique<JobSystem>(threads);
     }
 
     void Simulation::Populate()
@@ -1530,6 +1548,42 @@ namespace CnaCity
         }
         if (walking_.empty()) return kNoIndex;
         return walking_[roll % walking_.size()];
+    }
+
+    void Simulation::Serialize(Archive& archive)
+    {
+        archive.Fence(0x51AB0000u);
+        agents_.Serialize(archive);
+        routes_.Serialize(archive);
+        traffic_.Serialize(archive);
+        metro_.Serialize(archive);
+        buses_.Serialize(archive);
+        clock_.Serialize(archive);
+        weather_.Serialize(archive);
+
+        archive.Fence(0x51AB0001u);
+        archive.Pod(tick_);
+        archive.Pod(simulatedSeconds_);
+        archive.Pod(decisionEpoch_);
+        archive.Pod(decisionPass_);
+        archive.Pod(stepAccumulator_);
+        archive.Pod(planRotation_);
+        archive.Pod(lastDayReset_);
+
+        // The queues, which are the one piece of state that is neither an agent nor a vehicle and
+        // which nothing else can rebuild: who is standing on which platform, in what order, is a
+        // fact about the past.
+        archive.Fence(0x51AB0002u);
+        archive.NestedVector(platformQueue_);
+        archive.NestedVector(stopQueue_);
+        archive.Fence(0x51AB0003u);
+
+        if (!archive.writing())
+        {
+            // Rebuilt rather than stored: both are derived from the agent array, and a loaded
+            // snapshot that trusted a stored copy would be trusting a cache.
+            CollectModeLists(true);
+        }
     }
 
     std::size_t Simulation::MemoryBytes() const

@@ -112,6 +112,32 @@ namespace CnaCityTests
     // said NO to both while the defect was in. That is minutes rather than seconds, so it belongs
     // in CI rather than in this file -- see the Tests section of README.md.
 
+    TEST(Determinism, InitializeLeavesNothingBehindFromAPreviousRun)
+    {
+        // Initialize used to reset the tick, the clock and the decision epoch, and to leave the
+        // decision pass, the step accumulator, the planning rotation and the day-rollover marker
+        // where the last run had left them. That was invisible while nothing initialised the same
+        // object twice, and it made the city depend on what that object had simulated before the
+        // moment something did -- which the --checksum self-check does, to have something to
+        // compare against.
+        const SimConfig config = SmallSimConfig(2500, 9090);
+
+        Simulation fresh;
+        fresh.Initialize(config);
+        RunFor(fresh, 900.0f, 2.0f);
+        const std::uint64_t expected = StateChecksum(fresh);
+
+        Simulation reused;
+        reused.Initialize(SmallSimConfig(4000, 1111));   // a different city entirely
+        RunFor(reused, 1800.0f, 2.0f);
+        reused.Initialize(config);                        // and now the one under test
+        RunFor(reused, 900.0f, 2.0f);
+
+        EXPECT_EQ(StateChecksum(reused), expected)
+            << "a re-initialised simulation carried state over from the run before it";
+        EXPECT_EQ(reused.tick(), fresh.tick());
+    }
+
     TEST(Determinism, ADifferentSeedGivesADifferentCity)
     {
         EXPECT_NE(RunAndDigest(SmallSimConfig(2000, 11), 600.0f, 1.0f),

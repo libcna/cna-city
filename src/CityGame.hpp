@@ -154,6 +154,7 @@ namespace CnaCity
         /// It is a member rather than a pointer because "not recording" is the common case and a
         /// closed recorder is already the do-nothing one.
         ReplayRecorder recorder_;
+        bool savedSnapshot_ = false;
         /// Writes the replay if one is being recorded. Idempotent; called from both exit paths.
         void FinishRecording();
 

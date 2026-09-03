@@ -295,3 +295,53 @@ sentence that has been wrong three times needs a check rather than a rewrite.
 - **Only two kinds of interactive event are recorded**, the weather and the clock, because they are
   the only two that change the simulation. Camera moves, overlays and the quality dial do not, and
   a replay that recorded them would be a screen recording with extra steps.
+
+---
+
+## P13 — Snapshots, so a measurement does not start with a wait
+
+Added 2026-09-03. Measuring the morning peak means simulating up to the morning peak first: at a
+hundred thousand citizens that is twenty-five seconds of warm-up before the first number, paid
+again for every scale, every renderer and every run.
+
+- [x] **P13.1 `--save` and `--load`.** A snapshot stores what cannot be recomputed -- the
+  population, the traffic, both fleets, the clock, the weather, every generator's state and the
+  queues on the platforms -- and a *digest* of the city, which is a pure function of the seed. A
+  snapshot taken against a generator that has since changed is refused rather than loaded into a
+  world whose roads have moved under its traffic. *Accept:* loading takes 0.27 s against 25 s of
+  warm-up, and a restored world has the same future.
+
+- [x] **P13.2 One traversal for reading and writing.** `Archive` walks the same code in both
+  directions, because every save format with a `Write` and a matching `Read` eventually has a field
+  in one and not the other -- and the symptom is a file that loads into a plausible world with
+  everything after that field shifted by four bytes.
+
+- [x] **P13.3 A scenario set.** `scripts/make-scenarios.sh` builds empty-night, morning-rush,
+  evening-rush, rain-gridlock and metro-peak. Twenty megabytes each and gitignored: they are
+  regenerable, and a git history is not the place for what can be recomputed.
+
+- [x] **P13.4 `--bench --load`.** Measures one scenario rather than sweeping from an empty city.
+  A snapshot pins the population, so a sweep and a snapshot are mutually exclusive and the caller
+  is told rather than surprised.
+
+### What it found
+
+Building the `--checksum` self-check meant initialising two simulations to compare, and nothing had
+ever done that before. Three things did not survive it:
+
+- [x] **P13.5 `City::Generate` did not clear what it generated.** Every stage cleared its own
+  output except one: park planting appends to `props_` while the blocks are being built, so
+  `GenerateProps` deliberately does not clear it -- and nothing else did either. Generating twice
+  into the same `City` produced two of every lamp post and two of every tree, some of them in
+  places that were no longer parks.
+
+- [x] **P13.6 `Simulation::Initialize` reset three counters and left four.** The decision pass, the
+  step accumulator, the planning rotation and the day-rollover marker kept whatever the previous
+  run had left them at.
+
+- [x] **P13.7 `Traffic::Build` left the signal cycle where it was.** The per-junction offsets are
+  hashed from the node index and were always reproducible; it was the clock they are measured
+  against that carried over, so a rebuilt city had nine junctions at a different point in their
+  phase on the first tick.
+
+All three were invisible for as long as nothing built a city twice, which nothing did until this.

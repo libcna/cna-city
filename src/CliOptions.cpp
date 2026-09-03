@@ -102,6 +102,9 @@ namespace CnaCity
             "  --record FILE         Write a replay of this run\n"
             "  --replay FILE         Re-run a replay and report whether it still reproduces\n"
             "  --checkpoint-every N  Ticks between replay checkpoints (default 1200)\n"
+            "  --save FILE           Write a snapshot of the world when the run ends\n"
+            "  --load FILE           Start from a snapshot instead of from the start hour\n"
+            "  --note TEXT           Description stored in the snapshot header\n"
             "  --frames N            Stop after N frames\n"
             "  --screenshot FILE     Write one PNG and exit\n"
             "  --help                This text\n"
@@ -170,6 +173,21 @@ namespace CnaCity
             else if (arg == "--follow-metro") { options.camera = CameraMode::Follow; options.followMetro = true; }
             else if (arg == "--no-post") options.noPost = true;
             else if (arg == "--checksum") options.mode = RunMode::Checksum;
+            else if (arg == "--save")
+            {
+                if (!next(value)) { options.error = "--save needs a path"; return false; }
+                options.savePath = value;
+            }
+            else if (arg == "--load")
+            {
+                if (!next(value)) { options.error = "--load needs a path"; return false; }
+                options.loadPath = value;
+            }
+            else if (arg == "--note")
+            {
+                if (!next(value)) { options.error = "--note needs some text"; return false; }
+                options.snapshotNote = value;
+            }
             else if (arg == "--simulate")
             {
                 // "24h", "90m", "600s", or a bare number of hours. The unit matters more than the

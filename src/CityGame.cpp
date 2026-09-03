@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "CityGame.hpp"
 
+#include "Snapshot.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -96,6 +98,15 @@ namespace CnaCity
 
     void CityGame::FinishRecording()
     {
+        if (!options_.savePath.empty() && !savedSnapshot_)
+        {
+            savedSnapshot_ = true;
+            std::string error;
+            if (SaveSnapshot(options_.savePath, sim_, options_.snapshotNote, error))
+                std::printf("cna-city: wrote %s\n", options_.savePath.c_str());
+            else
+                std::fprintf(stderr, "cna-city: %s\n", error.c_str());
+        }
         if (!recorder_.recording()) return;
         recorder_.Close(sim_);
         if (recorder_.error().empty())
@@ -212,7 +223,24 @@ namespace CnaCity
 
         System::Diagnostics::Stopwatch watch;
         watch.Start();
-        sim_.Initialize(options_.sim);
+        if (options_.loadPath.empty())
+        {
+            sim_.Initialize(options_.sim);
+        }
+        else
+        {
+            // A snapshot carries its own city, so this replaces the configuration rather than
+            // adding to it -- which is also why the camera and quality flags still apply and the
+            // seed and population ones do not.
+            std::string error;
+            if (LoadSnapshot(options_.loadPath, sim_, error))
+                std::printf("cna-city: loaded %s\n", options_.loadPath.c_str());
+            else
+            {
+                std::fprintf(stderr, "cna-city: %s\n", error.c_str());
+                sim_.Initialize(options_.sim);
+            }
+        }
         watch.Stop();
 
         // Opened before the first frame, so a session that cannot write its replay says so now

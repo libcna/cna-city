@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "Archive.hpp"
 #include "CityMath.hpp"
 
 namespace CnaCity
@@ -89,6 +90,23 @@ namespace CnaCity
         [[nodiscard]] std::size_t exhaustedCount() const { return exhausted_; }
         [[nodiscard]] std::size_t bytes() const { return nodes_.size() * sizeof(std::uint32_t); }
 
+        /** @brief Reads or writes the pool, free list included: a slot index is only meaningful
+         *  against the same free list, and every travelling agent holds one. */
+        void Serialize(Archive& archive)
+        {
+            archive.Vector(nodes_);
+            archive.Vector(free_);
+            auto slots = static_cast<std::uint64_t>(slotCount_);
+            auto exhausted = static_cast<std::uint64_t>(exhausted_);
+            archive.Pod(slots);
+            archive.Pod(exhausted);
+            if (!archive.writing())
+            {
+                slotCount_ = static_cast<std::size_t>(slots);
+                exhausted_ = static_cast<std::size_t>(exhausted);
+            }
+        }
+
     private:
         std::vector<std::uint32_t> nodes_;
         std::vector<std::uint32_t> free_;
@@ -149,6 +167,17 @@ namespace CnaCity
         [[nodiscard]] std::size_t size() const { return position.size(); }
 
         void Resize(std::size_t count);
+
+        /**
+         * @brief Reads or writes every array, in declaration order.
+         *
+         * All of them, including the schedule block that never changes after Populate. It could be
+         * regenerated from the seed instead and that would halve the file, but it would also mean
+         * a snapshot silently disagreeing with the world it came from the day somebody changes how
+         * a citizen's day is chosen -- and a snapshot whose population is subtly not the saved one
+         * is worse than a bigger file.
+         */
+        void Serialize(Archive& archive);
 
         [[nodiscard]] bool OwnsCar(std::size_t i) const { return (flags[i] & 0x01u) != 0; }
         [[nodiscard]] std::uint8_t Appearance(std::size_t i) const { return flags[i] >> 4; }

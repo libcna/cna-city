@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "Archive.hpp"
+
 #include <cstdint>
 
 #include "CityMath.hpp"
@@ -36,6 +38,15 @@ namespace CnaCity
          * pure function of the seconds it has been asked for, so this computes it instead.
          */
         void setSimulatedSeconds(float startHour, double simulatedSeconds);
+
+        /** @brief Reads or writes the clock. The sun is recomputed rather than stored. */
+        void Serialize(Archive& archive)
+        {
+            archive.Pod(hour_);
+            archive.Pod(day_);
+            archive.Pod(scale_);
+            if (!archive.writing()) RecomputeSun();
+        }
 
         [[nodiscard]] float hour() const { return hour_; }
         [[nodiscard]] int day() const { return day_; }
@@ -129,6 +140,35 @@ namespace CnaCity
         [[nodiscard]] float temperatureC() const { return temperature_; }
         /// Multiplies how far a pedestrian is willing to walk before taking a train instead.
         [[nodiscard]] float WalkingAversion() const;
+
+        /**
+         * @brief Reads or writes the weather, its targets and its generator.
+         *
+         * The targets and the countdown matter as much as the current values: the weather is a
+         * five-minute lag towards something, and a snapshot that restored where it *is* without
+         * where it is *going* would start drifting somewhere else the moment it loaded.
+         */
+        void Serialize(Archive& archive)
+        {
+            rng_.Serialize(archive);
+            archive.Pod(kind_);
+            archive.Pod(remaining_);
+            archive.Pod(randomChanges_);
+            archive.Pod(cloudiness_);
+            archive.Pod(cloudinessTarget_);
+            archive.Pod(precipitation_);
+            archive.Pod(precipitationTarget_);
+            archive.Pod(fogDensity_);
+            archive.Pod(fogTarget_);
+            archive.Pod(turbidity_);
+            archive.Pod(turbidityTarget_);
+            archive.Pod(wetness_);
+            archive.Pod(snowCover_);
+            archive.Pod(windSpeed_);
+            archive.Pod(windTarget_);
+            archive.Pod(windDirection_);
+            archive.Pod(temperature_);
+        }
 
     private:
         void PickTarget();

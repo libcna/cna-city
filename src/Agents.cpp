@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "Agents.hpp"
 
+#include "Archive.hpp"
+
 namespace CnaCity
 {
     const char* ActivityName(Activity activity)
@@ -111,5 +113,46 @@ namespace CnaCity
         bedMinute.assign(count, 0);
         profile.assign(count, static_cast<std::uint8_t>(Profile::Worker));
         flags.assign(count, 0);
+    }
+}
+
+namespace CnaCity
+{
+    void Agents::Serialize(Archive& archive)
+    {
+        archive.Fence(0xA6E27500u);
+        archive.Vector(position);
+        archive.Vector(heading);
+        archive.Vector(speed);
+        archive.Vector(desiredSpeed);
+        archive.Vector(animationPhase);
+        archive.Vector(mode);
+        archive.Vector(activity);
+
+        archive.Fence(0xA6E27501u);
+        archive.Vector(pathSlot);
+        archive.Vector(pathLength);
+        archive.Vector(pathCursor);
+        archive.Vector(targetBuilding);
+        archive.Vector(vehicle);
+        archive.Vector(metroBoard);
+        archive.Vector(metroAlight);
+        archive.Vector(metroTrain);
+        archive.Vector(busBoard);
+        archive.Vector(busAlight);
+        archive.Vector(busVehicle);
+        archive.Vector(waitTimer);
+
+        archive.Fence(0xA6E27502u);
+        archive.Vector(home);
+        archive.Vector(work);
+        archive.Vector(haunt);
+        archive.Vector(leaveHomeMinute);
+        archive.Vector(leaveWorkMinute);
+        archive.Vector(lunchMinute);
+        archive.Vector(bedMinute);
+        archive.Vector(profile);
+        archive.Vector(flags);
+        archive.Fence(0xA6E27503u);
     }
 }

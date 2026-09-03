@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Agents.hpp"
+#include "Archive.hpp"
 #include "CityMath.hpp"
 #include "RoadNetwork.hpp"
 
@@ -121,6 +122,15 @@ namespace CnaCity
         [[nodiscard]] std::uint8_t SignalColour(std::uint32_t node, std::uint32_t incidenceSlot) const;
 
         [[nodiscard]] float signalClock() const { return signalClock_; }
+
+        /**
+         * @brief Reads or writes the fleet and the signals.
+         *
+         * The lane buckets are *not* stored: they are rebuilt from the vehicles every sub-step
+         * anyway, so storing them would be storing a cache -- and a stale one is the kind of thing
+         * that loads without complaint and then puts two cars in the same place.
+         */
+        void Serialize(Archive& archive);
 
     private:
         void RebuildLanes(const City& city);
