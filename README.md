@@ -109,6 +109,63 @@ frame rate.
 GoogleTest comes from CNA's own vendored checkout, so there is nothing to fetch. Turn the suite off
 with `-DCNA_CITY_BUILD_TESTS=OFF`.
 
+### The determinism check, which does not fit in a unit test
+
+```sh
+./build/cna-city --seed 42 --agents 100000 --simulate 24h --checksum
+```
+
+```
+CITY      bb4d00afc47a677b
+AGENTS    c4cf0009fc568ade
+TRAFFIC   8d0c002daccd37b5
+TRANSIT   ac3af86cc52dcda6
+WORLD     22afa8bce65d2721
+FINAL     a4f1dbeb74bee2b8
+
+reproduced
+  at half the step size            yes
+  on 1 worker threads instead of 16  yes
+```
+
+Five digests rather than one, because a mismatch should be a lead and not just a verdict: a city
+that differs means the *generator* moved, agents alone means the schedule or the steering did,
+traffic alone means the road model did. It then re-runs the whole thing at half the step size and
+on a different number of worker threads and says whether those agreed — a determinism claim that is
+only ever checked one way is one that has already been broken here twice.
+
+This belongs in CI rather than in the unit suite because it takes minutes, and because it catches
+things a fast test cannot. The last defect it found needed a hundred thousand citizens and eight
+simulated hours: the list of arrivals is gathered in parallel with an atomic increment, an arrival
+joins the *back* of a platform queue, and a train drains that queue from the *front* — so which of
+two citizens got on a full train depended on which worker thread finished first. Comparing two runs
+at fifty thousand agents caught that three times in six; at full scale it is reliable.
+
+## Recording and replaying
+
+```sh
+./build/cna-city --agents 100000 --record monday.cna-replay
+./build/cna-city --replay monday.cna-replay
+```
+
+A replay is about a kilobyte for a simulated day of a hundred thousand people, because it stores
+the *input* and not the world: the seed, the configuration, how many fixed ticks ran, and the few
+moments somebody changed the weather or wound the clock. Everything else is recomputed, which is
+only possible because the tick is fixed-length and the simulation is a function of its seed.
+
+Replaying is a test rather than a video. It compares a digest at checkpoints as it goes and stops
+at the first disagreement, naming the tick and which half of the world stopped matching:
+
+```
+DIVERGED at tick 50004, in the agents
+            expected         actual
+  CITY      bb4d00afc47a677b bb4d00afc47a677b
+  AGENTS    2364b0d2bb458145 8128adbcd2e5ab4f <--
+```
+
+`--replay FILE --threads 1` re-runs a recording on a different number of workers, which is how the
+arrival-queue defect above was pinned to a tick.
+
 ## Build
 
 ```sh
@@ -135,6 +192,9 @@ off by default in CNA and this demo is the reason to switch it on.
 ./build/cna-city --follow-bus               # the same, on the buses
 ./build/cna-city --no-post                  # the raw scene, no tonemapper
 ./build/cna-city --bench --scales 1000,10000,100000 --csv bench.csv
+./build/cna-city --checksum --simulate 24h        # a digest CI can compare
+./build/cna-city --record monday.cna-replay       # keep this session
+./build/cna-city --replay monday.cna-replay       # and check it still reproduces
 ```
 
 `--help` lists everything.

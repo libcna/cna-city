@@ -84,7 +84,25 @@ namespace CnaCity
         postProcessing_ = !options_.noPost;
     }
 
-    CityGame::~CityGame() = default;
+    CityGame::~CityGame()
+    {
+        // Closed here rather than only in UnloadContent, because a run that ends on `--frames`
+        // does not necessarily get an UnloadContent -- and a replay file that is empty because the
+        // program exited the wrong way is worse than no replay file at all. Close is idempotent,
+        // so the tidy path still writes it at the tidy moment; members are still alive in a
+        // destructor body, so the simulation the final checkpoint needs is here.
+        FinishRecording();
+    }
+
+    void CityGame::FinishRecording()
+    {
+        if (!recorder_.recording()) return;
+        recorder_.Close(sim_);
+        if (recorder_.error().empty())
+            std::printf("cna-city: wrote %s\n", options_.recordPath.c_str());
+        else
+            std::fprintf(stderr, "cna-city: %s\n", recorder_.error().c_str());
+    }
 
     void CityGame::Initialize()
     {
@@ -196,6 +214,11 @@ namespace CnaCity
         watch.Start();
         sim_.Initialize(options_.sim);
         watch.Stop();
+
+        // Opened before the first frame, so a session that cannot write its replay says so now
+        // rather than after somebody has spent twenty minutes producing one.
+        if (!options_.recordPath.empty() && !recorder_.Open(options_.recordPath, options_.sim))
+            std::fprintf(stderr, "cna-city: %s\n", recorder_.error().c_str());
         std::printf("cna-city: simulation ready in %.0f ms -- %u citizens, %zu buildings, %.1f km of road\n",
                     ElapsedMs(watch), options_.sim.agentCount, sim_.city().buildings().size(),
                     sim_.city().roads().TotalLength() / 1000.0);
@@ -316,6 +339,7 @@ namespace CnaCity
 
     void CityGame::UnloadContent()
     {
+        FinishRecording();
         debug_.reset();
         skyLight_.Release();
         prepass_.reset();
@@ -381,9 +405,17 @@ namespace CnaCity
             const int next = (static_cast<int>(sim_.weather().kind()) + 1) % kWeatherKindCount;
             sim_.mutableWeather().Force(static_cast<WeatherKind>(next));
             sim_.mutableWeather().SetRandomChanges(false);
+            recorder_.RecordWeather(sim_.tick(), static_cast<WeatherKind>(next));
         }
-        if (keys.IsKeyDown(Keys::T)) sim_.mutableClock().setHour(sim_.clock().hour() + dt * 1.4f);
-        if (keys.IsKeyDown(Keys::G)) sim_.mutableClock().setHour(sim_.clock().hour() - dt * 1.4f);
+        if (keys.IsKeyDown(Keys::T) || keys.IsKeyDown(Keys::G))
+        {
+            const float direction = keys.IsKeyDown(Keys::T) ? 1.0f : -1.0f;
+            sim_.mutableClock().setHour(sim_.clock().hour() + direction * dt * 1.4f);
+            // Recorded every frame the key is held, which is a lot of events for a long scrub --
+            // and correct, because winding the clock is a continuous input and a replay that
+            // sampled it would put the city in a different hour than the one that was watched.
+            recorder_.RecordHour(sim_.tick(), sim_.clock().hour());
+        }
         if (pressed(Keys::OemOpenBrackets))
             sim_.mutableClock().setTimeScale(std::max(1.0f, sim_.clock().timeScale() * 0.5f));
         if (pressed(Keys::OemCloseBrackets))
@@ -916,6 +948,7 @@ namespace CnaCity
             // honest when the frame rate drops -- the city does not slow down because the renderer
             // did.
             sim_.Step(clamped * sim_.clock().timeScale());
+            recorder_.MaybeCheckpoint(sim_, options_.checkpointInterval);
         }
         watch.Stop();
         simMs_ = ElapsedMs(watch);

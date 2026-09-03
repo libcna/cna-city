@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include "Benchmark.hpp"
 
+#include "Checksum.hpp"
+#include "Replay.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <string>
@@ -145,6 +148,140 @@ namespace CnaCity
                     result.cacheHitRate * 100.0,
                     static_cast<unsigned long long>(result.gridlocked));
         return 0;
+    }
+
+    namespace
+    {
+        /// Steps @p sim for @p seconds in slices of @p slice, recording as it goes.
+        void SimulateFor(Simulation& sim, float seconds, float slice, ReplayRecorder* recorder,
+                         std::uint64_t checkpointInterval)
+        {
+            const auto steps = static_cast<int>(seconds / slice);
+            for (int i = 0; i < steps; ++i)
+            {
+                sim.Step(slice);
+                if (recorder != nullptr) recorder->MaybeCheckpoint(sim, checkpointInterval);
+            }
+        }
+    }
+
+    int RunChecksum(const CliOptions& options)
+    {
+        Simulation sim;
+        sim.Initialize(options.sim);
+
+        ReplayRecorder recorder;
+        ReplayRecorder* recording = nullptr;
+        if (!options.recordPath.empty())
+        {
+            if (!recorder.Open(options.recordPath, options.sim))
+            {
+                std::fprintf(stderr, "cna-city: %s\n", recorder.error().c_str());
+                return 2;
+            }
+            recording = &recorder;
+        }
+
+        const float slice = options.sim.timeScale / kTickHz;
+        SimulateFor(sim, options.simulateSeconds, slice, recording, options.checkpointInterval);
+        const WorldChecksum digest = ComputeChecksum(sim);
+
+        std::printf("cna-city checksum -- seed %llu, %u agents, %.1f simulated hours, %llu ticks\n\n",
+                    static_cast<unsigned long long>(options.sim.city.seed), options.sim.agentCount,
+                    static_cast<double>(options.simulateSeconds) / 3600.0,
+                    static_cast<unsigned long long>(sim.tick()));
+        std::printf("CITY      %s\n", ToHex(digest.city).c_str());
+        std::printf("AGENTS    %s\n", ToHex(digest.agents).c_str());
+        std::printf("TRAFFIC   %s\n", ToHex(digest.traffic).c_str());
+        std::printf("TRANSIT   %s\n", ToHex(digest.transit).c_str());
+        std::printf("WORLD     %s\n", ToHex(digest.world).c_str());
+        std::printf("FINAL     %s\n", ToHex(digest.total).c_str());
+
+        if (recording != nullptr)
+        {
+            recorder.Close(sim);
+            if (!recorder.error().empty())
+            {
+                std::fprintf(stderr, "cna-city: %s\n", recorder.error().c_str());
+                return 2;
+            }
+            std::printf("\nwrote %s\n", options.recordPath.c_str());
+        }
+
+        // The same run again, driven differently. A digest printed once says what this build did;
+        // a digest that survives a different step size and a different number of worker threads
+        // says the city is a function of its seed -- which is the actual claim, and which was
+        // false in three separate ways until a test asked.
+        std::printf("\nreproduced");
+        bool ok = true;
+        {
+            SimConfig halfStep = options.sim;
+            Simulation other;
+            other.Initialize(halfStep);
+            SimulateFor(other, options.simulateSeconds, slice * 0.5f, nullptr, 0);
+            const bool same = ComputeChecksum(other) == digest;
+            ok = ok && same;
+            std::printf("\n  at half the step size            %s", same ? "yes" : "NO");
+        }
+        {
+            SimConfig threaded = options.sim;
+            threaded.threads = options.sim.threads == 1 ? 4 : 1;
+            Simulation other;
+            other.Initialize(threaded);
+            SimulateFor(other, options.simulateSeconds, slice, nullptr, 0);
+            const bool same = ComputeChecksum(other) == digest;
+            ok = ok && same;
+            // The *actual* counts, not what was configured: --threads 0 means "as many as the
+            // machine has", and reporting a comparison against 0 threads helps nobody.
+            std::printf("\n  on %d worker threads instead of %d  %s", other.threadCount(),
+                        sim.threadCount(), same ? "yes" : "NO");
+        }
+        std::printf("\n");
+        return ok ? 0 : 1;
+    }
+
+    int RunReplayFile(const CliOptions& options)
+    {
+        ReplayFile file;
+        std::string error;
+        if (!LoadReplay(options.replayPath, file, error))
+        {
+            std::fprintf(stderr, "cna-city: %s\n", error.c_str());
+            return 2;
+        }
+
+        // A replay takes its thread count from the file, unless the caller says otherwise --
+        // which is how "does this still reproduce on one thread" gets asked.
+        if (options.threadsGiven) file.config.threads = options.sim.threads;
+
+        std::printf("cna-city replay -- %s\n", options.replayPath.c_str());
+        std::printf("  seed %llu, %u agents, %llu ticks, %zu events, %zu checkpoints\n\n",
+                    static_cast<unsigned long long>(file.config.city.seed), file.config.agentCount,
+                    static_cast<unsigned long long>(file.ticks), file.events.size(),
+                    file.checkpoints.size());
+
+        const ReplayResult result = RunReplay(file);
+        if (result.reproduced)
+        {
+            std::printf("REPRODUCED -- %llu checkpoints, all matching\n",
+                        static_cast<unsigned long long>(result.checkpointsChecked));
+            return 0;
+        }
+
+        std::printf("DIVERGED at tick %llu, in the %s\n",
+                    static_cast<unsigned long long>(result.divergedAtTick),
+                    result.divergedIn.c_str());
+        std::printf("  %-9s %-16s %-16s\n", "", "expected", "actual");
+        const auto row = [](const char* name, std::uint64_t expected, std::uint64_t actual) {
+            std::printf("  %-9s %-16s %-16s %s\n", name, ToHex(expected).c_str(),
+                        ToHex(actual).c_str(), expected == actual ? "" : "<--");
+        };
+        row("CITY", result.expected.city, result.actual.city);
+        row("AGENTS", result.expected.agents, result.actual.agents);
+        row("TRAFFIC", result.expected.traffic, result.actual.traffic);
+        row("TRANSIT", result.expected.transit, result.actual.transit);
+        row("WORLD", result.expected.world, result.actual.world);
+        return 1;
     }
 
     int RunBenchmark(const CliOptions& options)

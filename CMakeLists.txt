@@ -83,6 +83,8 @@ add_library(cna-city-sim STATIC
     src/Agents.cpp
     src/Traffic.cpp
     src/Simulation.cpp
+    src/Checksum.cpp
+    src/Replay.cpp
     src/MeshBuilder.cpp
 )
 
@@ -179,6 +181,7 @@ if(CNA_CITY_BUILD_TESTS)
         tests/MetroTests.cpp
         tests/BusTests.cpp
         tests/DeterminismTests.cpp
+        tests/ReplayTests.cpp
     )
     target_link_libraries(cna-city-tests PRIVATE cna-city-sim gtest gmock)
     if(NOT MSVC)

@@ -97,6 +97,11 @@ namespace CnaCity
             "  --scales A,B,C        Agent counts for --bench (default 1000,10000,100000)\n"
             "  --csv FILE            Write the benchmark table to FILE\n"
             "  --headless            Simulate with no graphics device at all\n"
+            "  --checksum            Simulate, print a digest of the world, and exit\n"
+            "  --simulate D          How long --checksum and --record run: 24h, 90m, 600s\n"
+            "  --record FILE         Write a replay of this run\n"
+            "  --replay FILE         Re-run a replay and report whether it still reproduces\n"
+            "  --checkpoint-every N  Ticks between replay checkpoints (default 1200)\n"
             "  --frames N            Stop after N frames\n"
             "  --screenshot FILE     Write one PNG and exit\n"
             "  --help                This text\n"
@@ -146,7 +151,7 @@ namespace CnaCity
                 options.sim.randomWeather = false;
             }
             else if (arg == "--fixed-weather") options.sim.randomWeather = false;
-            else if (arg == "--threads") { std::uint32_t n = 0; if (!next(value) || !ParseUInt(value, n)) { options.error = "--threads needs a count"; return false; } options.sim.threads = static_cast<int>(n); }
+            else if (arg == "--threads") { std::uint32_t n = 0; if (!next(value) || !ParseUInt(value, n)) { options.error = "--threads needs a count"; return false; } options.sim.threads = static_cast<int>(n); options.threadsGiven = true; }
             else if (arg == "--quality")
             {
                 if (!next(value)) { options.error = "--quality needs a level"; return false; }
@@ -164,6 +169,40 @@ namespace CnaCity
             else if (arg == "--follow") options.camera = CameraMode::Follow;
             else if (arg == "--follow-metro") { options.camera = CameraMode::Follow; options.followMetro = true; }
             else if (arg == "--no-post") options.noPost = true;
+            else if (arg == "--checksum") options.mode = RunMode::Checksum;
+            else if (arg == "--simulate")
+            {
+                // "24h", "90m", "600s", or a bare number of hours. The unit matters more than the
+                // brevity: "--simulate 24" meaning seconds would be a very confusing way to ask
+                // for an empty city.
+                if (!next(value)) { options.error = "--simulate needs a duration"; return false; }
+                const std::string text = value;
+                const char unit = text.empty() ? 'h' : text.back();
+                const double amount = std::strtod(text.c_str(), nullptr);
+                const double scale = unit == 's' ? 1.0 : unit == 'm' ? 60.0 : 3600.0;
+                if (!(amount > 0.0))
+                {
+                    options.error = "--simulate wants a positive duration";
+                    return false;
+                }
+                options.simulateSeconds = static_cast<float>(amount * scale);
+            }
+            else if (arg == "--record")
+            {
+                if (!next(value)) { options.error = "--record needs a path"; return false; }
+                options.recordPath = value;
+            }
+            else if (arg == "--replay")
+            {
+                if (!next(value)) { options.error = "--replay needs a path"; return false; }
+                options.replayPath = value;
+                options.mode = RunMode::Replay;
+            }
+            else if (arg == "--checkpoint-every")
+            {
+                if (!next(value)) { options.error = "--checkpoint-every needs a tick count"; return false; }
+                options.checkpointInterval = std::strtoull(value, nullptr, 10);
+            }
             else if (arg == "--follow-bus") { options.camera = CameraMode::Follow; options.followBus = true; }
             else if (arg == "--camera")
             {

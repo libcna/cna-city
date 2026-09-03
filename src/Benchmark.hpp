@@ -15,4 +15,18 @@ namespace CnaCity
 
     /** @brief One simulated day with no window and no device, for profiling and for CI. */
     int RunHeadless(const CliOptions& options);
+
+    /**
+     * @brief Simulates for `--simulate` and prints a digest of the world.
+     *
+     * The point of it is CI: the same seed has to give the same city on every build, and a
+     * five-line digest is something a script can compare where a screenshot is not. It also
+     * re-runs the last stretch at a different step size and on a different number of threads and
+     * says whether those agreed, because a determinism claim that is only ever checked one way is
+     * a determinism claim that has already been broken twice here.
+     */
+    int RunChecksum(const CliOptions& options);
+
+    /** @brief Re-runs a `--record` file and reports whether it still reproduces. */
+    int RunReplayFile(const CliOptions& options);
 }

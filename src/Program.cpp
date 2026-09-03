@@ -28,6 +28,10 @@ int main(int argc, char** argv)
             return CnaCity::RunBenchmark(options);
         case CnaCity::RunMode::Headless:
             return CnaCity::RunHeadless(options);
+        case CnaCity::RunMode::Checksum:
+            return CnaCity::RunChecksum(options);
+        case CnaCity::RunMode::Replay:
+            return CnaCity::RunReplayFile(options);
         case CnaCity::RunMode::Interactive:
             break;
     }

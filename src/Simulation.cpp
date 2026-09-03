@@ -964,6 +964,18 @@ namespace CnaCity
         });
 
         const std::uint32_t arrivals = arrivalCount.load();
+        // Sorted, for the same reason the planning queue is: this list is filled in parallel with
+        // one atomic increment per arrival, so its order is whichever worker finished first -- and
+        // what consumes it is order-sensitive. An arrival joins the back of a platform or bus-stop
+        // queue, and a train drains that queue from the front, so the order two citizens reached
+        // the same platform decides which of them gets on a full train.
+        //
+        // It survived the first determinism tests because it needs two citizens to arrive at the
+        // same stop in the same tick *and* a queue that does not fully drain -- rare enough that a
+        // two-hour run at a hundred thousand agents reproduced perfectly and an eight-hour one did
+        // not. It was found by recording a run and replaying it, which named the tick and said the
+        // divergence was in the agents.
+        std::sort(arrived.begin(), arrived.begin() + arrivals);
         for (std::uint32_t k = 0; k < arrivals; ++k)
         {
             const std::uint32_t agent = arrived[k];

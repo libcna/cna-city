@@ -10,6 +10,7 @@
 #include "CliOptions.hpp"
 #include "InstanceRenderer.hpp"
 #include "Materials.hpp"
+#include "Replay.hpp"
 #include "Simulation.hpp"
 #include "SkyLighting.hpp"
 #include "TextRenderer.hpp"
@@ -148,6 +149,13 @@ namespace CnaCity
         std::size_t drawnParked_ = 0;
         std::size_t drawnTrainCars_ = 0;
         std::size_t drawnBuses_ = 0;
+
+        /// Writes a replay of this session when --record was given, and does nothing otherwise.
+        /// It is a member rather than a pointer because "not recording" is the common case and a
+        /// closed recorder is already the do-nothing one.
+        ReplayRecorder recorder_;
+        /// Writes the replay if one is being recorded. Idempotent; called from both exit paths.
+        void FinishRecording();
 
         /// True for the materials that exist only inside the metro tunnels.
         ///

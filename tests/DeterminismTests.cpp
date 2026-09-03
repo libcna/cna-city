@@ -91,6 +91,27 @@ namespace CnaCityTests
             << "the city depends on how many worker threads it was given";
     }
 
+    // There is deliberately no unit test here for the arrival-queue ordering defect, and the
+    // reason is worth writing down rather than leaving as an omission.
+    //
+    // The list of citizens who arrived somewhere this tick is filled in parallel with an atomic
+    // increment, so its order was whichever worker finished first -- and an arrival joins the back
+    // of a platform queue that a train drains from the front. Comparing two runs only catches that
+    // when the scheduling happens to differ *at a moment that changes an outcome*, which needs a
+    // full train or a full bus. Measured: at fifty thousand citizens over ninety simulated minutes
+    // the comparison caught it three times in six; at twenty and thirty thousand, funnelled
+    // through a single metro line and a single bus route, not once in twelve.
+    //
+    // A test that passes half the time when the bug is present is worse than no test, because it
+    // teaches people that a failure is noise. The guard for this class lives at full scale
+    // instead, where the race is reliable:
+    //
+    //     cna-city --seed 42 --agents 100000 --simulate 8h --checksum
+    //
+    // which reproduces at half the step size and on a different number of worker threads, and
+    // said NO to both while the defect was in. That is minutes rather than seconds, so it belongs
+    // in CI rather than in this file -- see the Tests section of README.md.
+
     TEST(Determinism, ADifferentSeedGivesADifferentCity)
     {
         EXPECT_NE(RunAndDigest(SmallSimConfig(2000, 11), 600.0f, 1.0f),

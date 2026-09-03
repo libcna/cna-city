@@ -14,7 +14,9 @@ namespace CnaCity
     {
         Interactive,   ///< A window, a camera and a HUD.
         Benchmark,     ///< A scale sweep with a CSV, with or without a device.
-        Headless       ///< Simulation only: no window, no graphics device at all.
+        Headless,      ///< Simulation only: no window, no graphics device at all.
+        Checksum,      ///< Simulate, print a digest of the world, exit.
+        Replay         ///< Re-run a recorded file and report whether it still reproduces.
     };
 
     /** @brief Visual quality, which is a bundle of pipeline settings rather than one dial. */
@@ -55,6 +57,17 @@ namespace CnaCity
         /// @ref followMetro, and needed for the same reason: four hundred citizens on a bus out of
         /// a hundred thousand is not something a random pick finds.
         bool followBus = false;
+        /// Simulated seconds for --checksum and --record. Accepts "24h", "90m", "600s" or hours.
+        float simulateSeconds = 24.0f * 3600.0f;
+        std::string recordPath;   ///< --record: write a replay of this run here.
+        std::string replayPath;   ///< --replay: re-run this file and check it.
+        /// Whether --threads was named. A replay takes its thread count from the file unless the
+        /// caller overrides it, and "does this still reproduce on one thread" is the question the
+        /// override exists to answer.
+        bool threadsGiven = false;
+        /// Ticks between replay checkpoints. Small enough to bisect a divergence, large enough
+        /// that taking one is not most of the run.
+        std::uint64_t checkpointInterval = 1200;
         bool showHelp = false;
         bool listWeather = false;
         std::string error;

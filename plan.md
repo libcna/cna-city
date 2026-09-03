@@ -241,3 +241,57 @@ twice.
   arterial from different streets see each other late, a few dozen moments a simulated hour, never
   closer than four metres. That residual is bounded by the test rather than asserted away, and
   closing it properly means putting the fleet in the IDM arrays.
+
+---
+
+## P12 — Determinism as a property rather than a claim
+
+Added 2026-09-03, after P11 made the tick fixed-length. The README had said "the same seed is
+always the same city" since it was written, and P11 found three ways in which that was false. A
+sentence that has been wrong three times needs a check rather than a rewrite.
+
+- [x] **P12.1 A digest of the world, split five ways.** `--checksum` simulates for `--simulate`
+  and prints CITY / AGENTS / TRAFFIC / TRANSIT / WORLD / FINAL. Five rather than one because a
+  mismatch should be a lead: a city that differs means the generator moved, agents alone means the
+  schedule or the steering did. Floats are quantised to a centimetre before hashing, so the check
+  fails on a defect rather than on a compiler flag. *Accept:* two runs of the same command print
+  the same six lines.
+
+- [x] **P12.2 The check checks itself.** `--checksum` re-runs at half the step size and on a
+  different number of worker threads and reports whether those agreed. A determinism claim that is
+  only ever exercised one way is one that has already been broken.
+
+- [x] **P12.3 Record and replay.** `--record FILE` writes the *input* -- seed, configuration, tick
+  count, and the moments somebody changed the weather or wound the clock -- and nothing else,
+  because everything else is recomputable. A simulated day of a hundred thousand citizens is about
+  a kilobyte. `--replay FILE` re-runs it, compares a digest at checkpoints, and stops at the first
+  disagreement naming the tick and the component. `--replay FILE --threads N` re-runs on a
+  different number of workers. *Accept:* a recorded run reproduces; a tampered checkpoint is caught
+  at the right tick and attributed to the right component; a changed seed is caught before a single
+  tick runs.
+
+### What it found
+
+- [x] **P12.4 The arrival queue depended on which worker thread finished first.** The list of
+  citizens who arrived somewhere this tick is gathered in parallel with an atomic increment, so its
+  order was whichever worker got there first -- and an arrival joins the *back* of a platform or
+  bus-stop queue that a vehicle drains from the *front*. Which of two citizens got on a full train
+  was decided by thread scheduling. The same root cause as the planning-queue defect in P11.7, in
+  the second of the two places it occurs.
+
+  It needed a hundred thousand citizens and eight simulated hours to show: a two-hour run
+  reproduced perfectly. It was found by recording a run and replaying it, which named tick 50 004
+  and said the divergence was in the agents.
+
+### Known and not asserted
+
+- **There is no unit test for P12.4, deliberately.** Comparing two runs only catches an ordering
+  race when the scheduling differs at a moment that changes an outcome, which needs a full vehicle.
+  Measured: at fifty thousand citizens over ninety simulated minutes it caught three times in six;
+  at twenty and thirty thousand funnelled through one metro line and one bus route, not once in
+  twelve. A test that passes half the time when the bug is present teaches people that a failure is
+  noise. The guard is `--checksum` at full scale, where the race is reliable, and it belongs in CI.
+
+- **Only two kinds of interactive event are recorded**, the weather and the clock, because they are
+  the only two that change the simulation. Camera moves, overlays and the quality dial do not, and
+  a replay that recorded them would be a screen recording with extra steps.
