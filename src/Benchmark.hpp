@@ -29,4 +29,13 @@ namespace CnaCity
 
     /** @brief Re-runs a `--record` file and reports whether it still reproduces. */
     int RunReplayFile(const CliOptions& options);
+
+    /**
+     * @brief Runs the sweep and writes a directory of results.
+     *
+     * A number printed to a terminal is a number nobody has next week. This leaves `system.json`,
+     * `simulation.csv`, `memory.csv`, `rendering.csv`, `passes.csv` and one self-contained
+     * `report.html` behind, so a run can be kept, diffed against another machine, and looked at.
+     */
+    int RunReport(const CliOptions& options);
 }

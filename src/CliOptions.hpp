@@ -16,7 +16,8 @@ namespace CnaCity
         Benchmark,     ///< A scale sweep with a CSV, with or without a device.
         Headless,      ///< Simulation only: no window, no graphics device at all.
         Checksum,      ///< Simulate, print a digest of the world, exit.
-        Replay         ///< Re-run a recorded file and report whether it still reproduces.
+        Replay,        ///< Re-run a recorded file and report whether it still reproduces.
+        Report         ///< Run the sweep and write a directory of results plus an HTML page.
     };
 
     /** @brief Visual quality, which is a bundle of pipeline settings rather than one dial. */
@@ -59,6 +60,10 @@ namespace CnaCity
         bool followBus = false;
         /// Simulated seconds for --checksum and --record. Accepts "24h", "90m", "600s" or hours.
         float simulateSeconds = 24.0f * 3600.0f;
+        std::string reportPath;   ///< --report: directory to write the benchmark artefacts into.
+        /// How many times --report measures each scale. The fastest is reported and the spread
+        /// beside it; one run on a shared machine is a number nobody can argue with.
+        int reportRepeats = 3;
         std::string savePath;     ///< --save: write a snapshot when the run ends.
         std::string loadPath;     ///< --load: start from a snapshot instead of from hour zero.
         std::string snapshotNote; ///< --note: free text stored in the snapshot header.

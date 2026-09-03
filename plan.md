@@ -345,3 +345,37 @@ ever done that before. Three things did not survive it:
   phase on the first tick.
 
 All three were invisible for as long as nothing built a city twice, which nothing did until this.
+
+---
+
+## P14 — A benchmark that leaves something behind
+
+Added 2026-09-03. A number printed to a terminal is a number nobody has next week, and comparing
+two machines meant comparing two scrollbacks.
+
+- [x] **P14.1 `--report DIR`.** Writes `system.json`, `simulation.csv`, `memory.csv`,
+  `rendering.csv`, `passes.csv` and one `report.html`. The page is self-contained -- the charts are
+  inline SVG rather than a library from a CDN, because an artefact whose purpose is to be kept and
+  opened later is usually opened somewhere without a network, and a page that fails that way fails
+  silently with blank graphs. *Accept:* every file parses, the page contains no `http`, and it
+  still renders with no data in it.
+
+- [x] **P14.2 A spread, not a number.** Each scale is measured `--repeat` times; the fastest run is
+  reported and the spread beside it. Two runs of the same build do identical work, so the
+  difference between them is whatever else the machine was doing -- the minimum is the closest
+  estimate of what the program costs, and the spread is what says whether the estimate is worth
+  anything. Measured on this repository: ±0.02 ms at a thousand agents on an idle machine, ±3.73 ms
+  at a hundred thousand on a busy one. A report that printed the second as fact would be
+  indistinguishable from a 50% regression. The page flags a spread wider than 15% of the mean.
+
+- [x] **P14.3 The report names what it measured.** Renderer, compiler, build type, thread count,
+  seed, the city's digest and the load average at the time. A benchmark that does not say what it
+  ran cannot be compared with anybody else's, and one that does not say the machine was busy
+  invites a false conclusion.
+
+### Not yet
+
+- **`rendering.csv` and `passes.csv` are written but empty.** They need a graphics device, and
+  `--report` is headless. The columns and the page section exist so that filling them is a change
+  in one place; doing it means driving `CityGame` through a scripted set of viewpoints, which is
+  the next step and the precondition for comparing CNA's renderers against each other.

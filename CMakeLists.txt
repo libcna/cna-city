@@ -85,11 +85,19 @@ add_library(cna-city-sim STATIC
     src/Simulation.cpp
     src/Checksum.cpp
     src/Snapshot.cpp
+    src/Report.cpp
     src/Replay.cpp
     src/MeshBuilder.cpp
 )
 
 target_include_directories(cna-city-sim PUBLIC src)
+# The renderer CNA was configured with, so a report can say what it measured without needing a
+# device to ask. A benchmark whose output does not name the renderer is a benchmark whose numbers
+# cannot be compared with anybody else's.
+target_compile_definitions(cna-city-sim PUBLIC
+    CNA_CITY_RENDERER="${CNA_GRAPHICS_RENDERER}"
+    CNA_CITY_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+    CNA_CITY_COMPILER="${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 target_link_libraries(cna-city-sim PUBLIC CNA)
 
 find_package(Threads REQUIRED)
@@ -184,6 +192,7 @@ if(CNA_CITY_BUILD_TESTS)
         tests/DeterminismTests.cpp
         tests/ReplayTests.cpp
         tests/SnapshotTests.cpp
+        tests/ReportTests.cpp
     )
     target_link_libraries(cna-city-tests PRIVATE cna-city-sim gtest gmock)
     if(NOT MSVC)

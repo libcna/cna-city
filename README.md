@@ -230,6 +230,45 @@ off by default in CNA and this demo is the reason to switch it on.
 
 `--help` lists everything.
 
+## Benchmark reports
+
+```sh
+./build/cna-city --report results --scales 1000,10000,50000,100000 --repeat 4
+```
+
+Leaves a directory behind rather than a number in a terminal:
+
+```
+results/
+    system.json      renderer, compiler, threads, seed, city digest, load average
+    simulation.csv   the scaling table
+    memory.csv       resident bytes per citizen
+    rendering.csv    frame cost by viewpoint
+    passes.csv       GPU pass timings
+    report.html      all of it, with charts
+```
+
+The page is self-contained — the charts are inline SVG, so it still works when it is opened in two
+years on a machine with no network.
+
+Each scale is measured `--repeat` times and the **fastest** run is reported with the **spread**
+beside it. That is not cherry-picking: two runs of the same build do identical work, so the
+difference between them is whatever else the machine was doing, and the minimum is the closest
+estimate of what this program costs. The spread is the part that matters — it says whether the
+number can be trusted at all. From two runs of this repository an hour apart:
+
+| agents | mean | spread |
+|---:|---:|---:|
+| 1 000 | 0.46 ms | ±0.02 |
+| 10 000 | 0.83 ms | ±0.08 |
+| 50 000 | 1.99 ms | ±0.14 |
+| 100 000 | 3.19 ms | **±0.51** |
+| 100 000, machine busy | 4.79 ms | **±3.73** |
+
+The last row is the same build on the same machine with something else running. A report that
+printed `4.79 ms` as fact would be indistinguishable from a 50% regression, and the page flags a
+spread that wide in the table rather than leaving it to be noticed.
+
 ## What it measures
 
 Every one of CNA's own examples isolates one subsystem so that a failure names itself. That is the

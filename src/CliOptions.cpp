@@ -96,6 +96,8 @@ namespace CnaCity
             "  --bench               Run the scale sweep and exit\n"
             "  --scales A,B,C        Agent counts for --bench (default 1000,10000,100000)\n"
             "  --csv FILE            Write the benchmark table to FILE\n"
+            "  --report DIR          Run the sweep and write CSVs, system.json and report.html\n"
+            "  --repeat N            Measure each scale N times for --report (default 3)\n"
             "  --headless            Simulate with no graphics device at all\n"
             "  --checksum            Simulate, print a digest of the world, and exit\n"
             "  --simulate D          How long --checksum and --record run: 24h, 90m, 600s\n"
@@ -173,6 +175,22 @@ namespace CnaCity
             else if (arg == "--follow-metro") { options.camera = CameraMode::Follow; options.followMetro = true; }
             else if (arg == "--no-post") options.noPost = true;
             else if (arg == "--checksum") options.mode = RunMode::Checksum;
+            else if (arg == "--repeat")
+            {
+                std::uint32_t n = 0;
+                if (!next(value) || !ParseUInt(value, n) || n == 0)
+                {
+                    options.error = "--repeat needs a positive count";
+                    return false;
+                }
+                options.reportRepeats = static_cast<int>(n);
+            }
+            else if (arg == "--report")
+            {
+                if (!next(value)) { options.error = "--report needs a directory"; return false; }
+                options.reportPath = value;
+                options.mode = RunMode::Report;
+            }
             else if (arg == "--save")
             {
                 if (!next(value)) { options.error = "--save needs a path"; return false; }

@@ -3,6 +3,7 @@
 
 #include "Checksum.hpp"
 #include "Replay.hpp"
+#include "Report.hpp"
 #include "Snapshot.hpp"
 
 #include <algorithm>
@@ -357,6 +358,74 @@ namespace CnaCity
         row("TRANSIT", result.expected.transit, result.actual.transit);
         row("WORLD", result.expected.world, result.actual.world);
         return 1;
+    }
+
+    int RunReport(const CliOptions& options)
+    {
+        Report report;
+        report.system = DescribeSystem();
+        report.system.seed = options.sim.city.seed;
+
+        std::vector<std::uint32_t> scales = options.benchScales;
+        if (scales.empty()) scales = {1000u, 10000u, 50000u, options.sim.agentCount};
+        std::sort(scales.begin(), scales.end());
+        scales.erase(std::unique(scales.begin(), scales.end()), scales.end());
+
+        std::printf("cna-city report -- %s, %s, seed %llu\n", report.system.os.c_str(),
+                    report.system.renderer.c_str(),
+                    static_cast<unsigned long long>(options.sim.city.seed));
+
+        // Each scale is measured more than once and the fastest run is the one reported, with the
+        // spread beside it. That is not cherry-picking: a slower run differs from a faster one by
+        // whatever else the machine was doing, so the minimum is the closest estimate of the cost
+        // of *this program* -- and the spread is what says whether the number can be trusted at
+        // all. A benchmark that prints one figure from one run on a shared machine is how a 12%
+        // regression and a busy desktop become indistinguishable.
+        const int repeats = std::max(1, options.reportRepeats);
+        for (const std::uint32_t agents : scales)
+        {
+            std::printf("  %u agents", agents);
+            std::fflush(stdout);
+            ScaleResult best;
+            double slowest = 0.0;
+            for (int run = 0; run < repeats; ++run)
+            {
+                const ScaleResult r =
+                    RunOneScale(options.sim, agents, 6.0f, false, options.loadPath);
+                if (r.agents == 0) return 2;
+                slowest = std::max(slowest, r.meanMs);
+                if (best.agents == 0 || r.meanMs < best.meanMs) best = r;
+                std::printf(".");
+                std::fflush(stdout);
+            }
+            std::printf(" %.2f ms\n", best.meanMs);
+            report.simulation.push_back(SimulationRow{
+                best.agents, best.setupMs, best.meanMs, best.p99Ms, best.worstMs, best.decisionMs,
+                best.walkMs, best.crowdMs, best.trafficMs, best.metroMs, best.busMs, best.memoryMb,
+                best.routeQueries, best.cacheHitRate, best.peakTravelling, best.gridlocked,
+                repeats, slowest - best.meanMs});
+            if (!options.loadPath.empty()) break;   // a snapshot pins the population
+        }
+
+        // The city digest and the worker count, taken from a simulation built the same way the
+        // measurements were, so the report names the exact city it is about.
+        {
+            Simulation sim;
+            SimConfig config = options.sim;
+            config.agentCount = scales.front();
+            sim.Initialize(config);
+            report.system.cityDigest = ToHex(ComputeCityChecksum(sim));
+            report.system.workerThreads = sim.threadCount();
+        }
+
+        std::string error;
+        if (!WriteReport(options.reportPath, report, error))
+        {
+            std::fprintf(stderr, "cna-city: %s\n", error.c_str());
+            return 2;
+        }
+        std::printf("\nwrote %s/report.html and four CSVs\n", options.reportPath.c_str());
+        return 0;
     }
 
     int RunBenchmark(const CliOptions& options)

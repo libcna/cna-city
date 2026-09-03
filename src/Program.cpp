@@ -32,6 +32,8 @@ int main(int argc, char** argv)
             return CnaCity::RunChecksum(options);
         case CnaCity::RunMode::Replay:
             return CnaCity::RunReplayFile(options);
+        case CnaCity::RunMode::Report:
+            return CnaCity::RunReport(options);
         case CnaCity::RunMode::Interactive:
             break;
     }
