@@ -77,6 +77,31 @@ namespace CnaCity
          *        the building's real size in metres divided by the facade tile size is what makes
          *        every building's windows the same physical size regardless of how big it is.
          */
+        /**
+         * @brief One quad of an enclosure, wound so that it is visible from @p interior.
+         *
+         * CNA's rule is a single rule -- a triangle is drawn when its winding normal points away
+         * from the camera -- and it is still the easiest thing in this program to get wrong,
+         * because the sign flips with which side of the surface you are standing on and a mirrored
+         * copy of a correct quad is an incorrect one. It has cost three separate defects here:
+         * every carriageway back-facing, every flat roof missing, and four of the six faces of
+         * every metro tunnel inside out.
+         *
+         * So the caller states no vertex order. It states a point inside the space being enclosed,
+         * and both the winding and the shading normal -- which points the opposite way, back into
+         * the space -- follow from that. One cross product per quad at generation time, and the
+         * whole class of mistake becomes unrepresentable.
+         *
+         * @param v0,v1,v2,v3 The quad's corners, in either circulation.
+         * @param interior    Any point on the side the surface is meant to be seen from.
+         * @param uvMin,uvMax The texture range to map across it.
+         */
+        void AddFacet(const Microsoft::Xna::Framework::Vector3& v0,
+                      const Microsoft::Xna::Framework::Vector3& v1,
+                      const Microsoft::Xna::Framework::Vector3& v2,
+                      const Microsoft::Xna::Framework::Vector3& v3,
+                      const Microsoft::Xna::Framework::Vector3& interior, Vec2 uvMin, Vec2 uvMax);
+
         void AddBox(Vec2 center, float baseY, Vec2 halfExtent, float height, float rotation,
                     Vec2 uvScaleSides, Vec2 uvOriginSides, bool includeTop, Vec2 topUvScale,
                     bool includeBottom = false);

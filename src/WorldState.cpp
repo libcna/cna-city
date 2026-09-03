@@ -33,6 +33,14 @@ namespace CnaCity
         RecomputeSun();
     }
 
+    void WorldClock::setSimulatedSeconds(float startHour, double simulatedSeconds)
+    {
+        const double hours = static_cast<double>(startHour) + simulatedSeconds / 3600.0;
+        day_ = static_cast<int>(hours / 24.0);
+        hour_ = static_cast<float>(hours - static_cast<double>(day_) * 24.0);
+        RecomputeSun();
+    }
+
     void WorldClock::Advance(float simulatedSeconds)
     {
         hour_ += simulatedSeconds / 3600.0f;

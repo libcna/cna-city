@@ -96,6 +96,12 @@ namespace CnaCity
         static constexpr float kMovementStep = 0.5f;
         /** @brief The most sub-steps one call will run; beyond this the time scale outruns motion. */
         static constexpr int kMaxSubSteps = 10;
+        /** @brief Simulated seconds between decision passes. See @ref Step. */
+        static constexpr float kDecisionPeriod = 1.5f;
+        /** @brief The most decision passes one call will catch up on. */
+        static constexpr int kMaxDecisionPasses = 6;
+        /** @brief Simulated seconds per weather update. See @ref Step. */
+        static constexpr float kWeatherStep = 1.5f;
 
         [[nodiscard]] const SimConfig& config() const { return config_; }
         [[nodiscard]] const City& city() const { return city_; }
@@ -169,10 +175,12 @@ namespace CnaCity
 
     private:
         void Populate();
-        void RunDecisions(float dt);
+        void RunDecisions(float dt, double nominalSeconds);
         void StartTrip(std::uint32_t agent, std::uint32_t destination, Activity nextActivity);
         void FinishTrip(std::uint32_t agent);
         void ReleaseRoute(std::uint32_t agent);
+        /** @brief One tick of @ref kMovementStep: clock, weather, decisions, movement. */
+        void FixedTick();
         void StepMovement(float dt);
         void StepWalking(float dt);
         void StepMetroPassengers(float dt);
@@ -218,8 +226,9 @@ namespace CnaCity
         /// machine and at any fixed step.
         double simulatedSeconds_ = 0.0;
         std::uint32_t decisionEpoch_ = 0;
-        float decisionAccumulator_ = 0.0f;
-        std::uint32_t decisionPass_ = 0;
+        std::uint64_t decisionPass_ = 0;
+        /// Simulated seconds asked for but not yet spent as whole ticks.
+        double stepAccumulator_ = 0.0;
 
         std::vector<std::uint32_t> walking_;
         std::vector<std::uint32_t> waiting_;

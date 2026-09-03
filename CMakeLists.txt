@@ -62,8 +62,15 @@ set(SHARP_RUNTIME_BUILD_TESTS OFF CACHE BOOL "Build sharp-runtime tests")
 
 add_subdirectory(../cnanext CNA_BUILD)
 
-add_executable(cna-city
-    src/Program.cpp
+# ---------------------------------------------------------------------------
+# The simulation half is a library, and the split is the same one `--headless`
+# already draws: everything below needs no graphics device, which is why the
+# benchmark can run the whole city without one. Making it a target rather than
+# a set of source files is what lets the tests link the city without linking a
+# renderer -- and `MeshBuilder` is on this side because the winding rule it
+# encodes has cost three defects and is worth asserting on directly.
+# ---------------------------------------------------------------------------
+add_library(cna-city-sim STATIC
     src/Rng.cpp
     src/CityMath.cpp
     src/RoadNetwork.cpp
@@ -77,6 +84,16 @@ add_executable(cna-city
     src/Traffic.cpp
     src/Simulation.cpp
     src/MeshBuilder.cpp
+)
+
+target_include_directories(cna-city-sim PUBLIC src)
+target_link_libraries(cna-city-sim PUBLIC CNA)
+
+find_package(Threads REQUIRED)
+target_link_libraries(cna-city-sim PUBLIC Threads::Threads)
+
+add_executable(cna-city
+    src/Program.cpp
     src/Materials.cpp
     src/CityGeometry.cpp
     src/SkyLighting.cpp
@@ -88,24 +105,23 @@ add_executable(cna-city
 )
 
 target_include_directories(cna-city PRIVATE src)
-target_link_libraries(cna-city PRIVATE CNA)
-
-find_package(Threads REQUIRED)
-target_link_libraries(cna-city PRIVATE Threads::Threads)
+target_link_libraries(cna-city PRIVATE cna-city-sim CNA)
 
 # CNA links what it needs itself, but cna-city reaches for System::Diagnostics::Stopwatch and
 # System::Threading::Tasks::Parallel directly, so it names those components rather than relying on
 # CNA's linkage staying PUBLIC.
 foreach(_component Core.Base Threading Threading.Tasks Diagnostics)
     if(TARGET SharpRuntime::${_component})
-        target_link_libraries(cna-city PRIVATE SharpRuntime::${_component})
+        target_link_libraries(cna-city-sim PUBLIC SharpRuntime::${_component})
     endif()
 endforeach()
 
 if(MSVC)
     target_compile_options(cna-city PRIVATE /W4)
+    target_compile_options(cna-city-sim PRIVATE /W4)
 else()
     target_compile_options(cna-city PRIVATE -Wall -Wextra)
+    target_compile_options(cna-city-sim PRIVATE -Wall -Wextra)
 endif()
 
 if(EMSCRIPTEN)
@@ -120,3 +136,59 @@ if(EMSCRIPTEN)
     )
 endif()
 
+
+# ---------------------------------------------------------------------------
+# Tests
+#
+# GoogleTest is the workspace's convention and CNA already vendors a checkout,
+# so this reuses that one rather than fetching a second: `../cnanext/vendor/
+# googletest` is a 30 MB tree and there is no reason for two of them on a disk.
+# CNA's own test build is off here (CNA_BUILD_TESTS), so the subdirectory is not
+# already added and this has to add it itself.
+# ---------------------------------------------------------------------------
+option(CNA_CITY_BUILD_TESTS "Build the cna-city test suite" ${PROJECT_IS_TOP_LEVEL})
+
+if(CNA_CITY_BUILD_TESTS)
+    set(_cna_city_gtest "${CMAKE_CURRENT_SOURCE_DIR}/../cnanext/vendor/googletest")
+    if(NOT EXISTS "${_cna_city_gtest}/CMakeLists.txt")
+        message(WARNING
+            "cna-city: no googletest at ${_cna_city_gtest}; the test suite will not be built. "
+            "It lives in CNA's vendor directory -- run CNA's own bootstrap, or turn this off "
+            "with -DCNA_CITY_BUILD_TESTS=OFF.")
+        set(CNA_CITY_BUILD_TESTS OFF)
+    endif()
+endif()
+
+if(CNA_CITY_BUILD_TESTS)
+    enable_testing()
+    if(NOT TARGET gtest)
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+        add_subdirectory("${_cna_city_gtest}" "${CMAKE_CURRENT_BINARY_DIR}/googletest" EXCLUDE_FROM_ALL)
+    endif()
+
+    add_executable(cna-city-tests
+        tests/TestMain.cpp
+        tests/WindingTests.cpp
+        tests/RoadNetworkTests.cpp
+        tests/CityGenerationTests.cpp
+        tests/PathfinderTests.cpp
+        tests/WorldStateTests.cpp
+        tests/AgentScheduleTests.cpp
+        tests/TrafficTests.cpp
+        tests/MetroTests.cpp
+        tests/BusTests.cpp
+        tests/DeterminismTests.cpp
+    )
+    target_link_libraries(cna-city-tests PRIVATE cna-city-sim gtest gmock)
+    if(NOT MSVC)
+        target_compile_options(cna-city-tests PRIVATE -Wall -Wextra)
+    endif()
+
+    include(GoogleTest)
+    # One CTest case per suite rather than per assertion: several of these build a whole city and
+    # simulate hours of it, so gtest_discover_tests' per-case process would pay that cost dozens of
+    # times over.
+    add_test(NAME CnaCityTests COMMAND cna-city-tests)
+    set_tests_properties(CnaCityTests PROPERTIES TIMEOUT 900)
+endif()

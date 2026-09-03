@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "MeshBuilder.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include "Microsoft/Xna/Framework/Graphics/BufferUsage.hpp"
@@ -51,6 +52,29 @@ namespace CnaCity
         vertices.emplace_back(c, normal, tangent, Vector2(uvMax.X, uvMin.Y));
         vertices.emplace_back(d, normal, tangent, Vector2(uvMin.X, uvMin.Y));
         indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+    }
+
+    void MeshData::AddFacet(const Vector3& a, const Vector3& b, const Vector3& c, const Vector3& d,
+                            const Vector3& interior, Vec2 uvMin, Vec2 uvMax)
+    {
+        Vector3 v0 = a, v1 = b, v2 = c, v3 = d;
+        const Vector3 e1(v1.X - v0.X, v1.Y - v0.Y, v1.Z - v0.Z);
+        const Vector3 e2(v2.X - v0.X, v2.Y - v0.Y, v2.Z - v0.Z);
+        Vector3 winding(e1.Y * e2.Z - e1.Z * e2.Y, e1.Z * e2.X - e1.X * e2.Z,
+                        e1.X * e2.Y - e1.Y * e2.X);
+        const Vector3 toInterior(interior.X - v0.X, interior.Y - v0.Y, interior.Z - v0.Z);
+        if (winding.X * toInterior.X + winding.Y * toInterior.Y + winding.Z * toInterior.Z > 0.0f)
+        {
+            std::swap(v0, v3);
+            std::swap(v1, v2);
+            winding = Vector3(-winding.X, -winding.Y, -winding.Z);
+        }
+        const float length = std::sqrt(winding.X * winding.X + winding.Y * winding.Y +
+                                       winding.Z * winding.Z);
+        const float scale = length > 1e-6f ? -1.0f / length : 0.0f;
+        AddQuad(v0, v1, v2, v3,
+                Vector3(winding.X * scale, winding.Y * scale, winding.Z * scale), uvMin,
+                Vec2(uvMax.X - uvMin.X, uvMax.Y - uvMin.Y));
     }
 
     void MeshData::AddBox(Vec2 center, float baseY, Vec2 halfExtent, float height, float rotation,
@@ -119,19 +143,23 @@ namespace CnaCity
                                       (halfExtent.Y + overhang) * (halfExtent.Y + overhang)) *
                             uvScale.Y;
 
-        // Both slopes, wound so the winding normal points into the roof -- see the note at the top
-        // of this file.
-        const Vec2 slopeNormalA = Normalized(axisV * -(ridgeHeight) + Vec2(0.0f, 0.0f));
-        (void)slopeNormalA;
-        const float run = halfExtent.Y + overhang;
-        const float inv = 1.0f / std::sqrt(run * run + ridgeHeight * ridgeHeight);
-        const Vector3 nearNormal(-axisV.X * ridgeHeight * inv, run * inv, -axisV.Y * ridgeHeight * inv);
-        const Vector3 farNormal(axisV.X * ridgeHeight * inv, run * inv, axisV.Y * ridgeHeight * inv);
-
-        AddQuad(ToWorld(eaveA, baseY), ToWorld(ridgeA, top), ToWorld(ridgeB, top),
-                ToWorld(eaveB, baseY), nearNormal, Vec2(0.0f, 0.0f), Vec2(uSpan, vSpan));
-        AddQuad(ToWorld(eaveC, baseY), ToWorld(ridgeB, top), ToWorld(ridgeA, top),
-                ToWorld(eaveD, baseY), farNormal, Vec2(0.0f, 0.0f), Vec2(uSpan, vSpan));
+        // Both slopes, wound by AddFacet against a point inside the roof void rather than by hand.
+        //
+        // They used to be wound by hand and they were inside out, which is the same defect the
+        // flat roofs had and is even harder to see: from a street-level camera you look *up* at a
+        // house, and an inverted slope is visible from underneath -- so the suburbs read correctly
+        // from every screenshot taken at eye level and vanished from every aerial one, leaving a
+        // scatter of gable slivers where the roofs should have been. It was found by a unit test
+        // and confirmed by tinting the tile material magenta and looking down at the city.
+        // The point above the ridge, not the void under it: AddFacet is told which side the
+        // surface is seen from, and a roof is seen from the sky. Handing it the loft instead
+        // produces a roof that is correct for a camera inside the house, which is the defect this
+        // replaced rather than a fix for it.
+        const Vector3 seenFrom = ToWorld(center, top + ridgeHeight + 1.0f);
+        AddFacet(ToWorld(eaveA, baseY), ToWorld(ridgeA, top), ToWorld(ridgeB, top),
+                 ToWorld(eaveB, baseY), seenFrom, Vec2(0.0f, 0.0f), Vec2(uSpan, vSpan));
+        AddFacet(ToWorld(eaveC, baseY), ToWorld(ridgeB, top), ToWorld(ridgeA, top),
+                 ToWorld(eaveD, baseY), seenFrom, Vec2(0.0f, 0.0f), Vec2(uSpan, vSpan));
 
         // The two gable triangles that close the ends.
         const Vector3 gableNear(-axisU.X, 0.0f, -axisU.Y);
@@ -144,7 +172,9 @@ namespace CnaCity
         vertices.emplace_back(ToWorld(eaveC, baseY), gableFar, tangentNear, Vector2(0.0f, vSpan));
         vertices.emplace_back(ToWorld(eaveB, baseY), gableFar, tangentNear, Vector2(uSpan, vSpan));
         vertices.emplace_back(ToWorld(ridgeB, top), gableFar, tangentNear, Vector2(uSpan * 0.5f, 0.0f));
-        indices.insert(indices.end(), {base, base + 1, base + 2, base + 3, base + 4, base + 5});
+        // Reversed, for the same reason: the gables were wound to face out of the house and a
+        // front face's winding normal points *into* the solid it bounds.
+        indices.insert(indices.end(), {base + 2, base + 1, base, base + 5, base + 4, base + 3});
     }
 
     void MeshData::AddRibbon(Vec2 from, Vec2 to, float halfWidth, float y, float uStart, float uEnd,

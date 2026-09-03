@@ -114,6 +114,7 @@ namespace CnaCity
         crowdStart_.assign(kCrowdBuckets + 1, 0);
 
         Populate();
+        CollectModeLists(true);
         tick_ = 0;
         simulatedSeconds_ = 0.0;
         decisionEpoch_ = 0;
@@ -503,15 +504,22 @@ namespace CnaCity
         }
     }
 
-    void Simulation::RunDecisions(float dt)
+    void Simulation::RunDecisions(float dt, double nominalSeconds)
     {
         const std::size_t count = agents_.size();
-        const float minuteOfDay = clock_.hour() * 60.0f;
+        // The hour this pass nominally happens at, derived from the simulated clock rather than
+        // read off it. WorldClock is a pure function of the seconds it has been advanced by, so
+        // this is the same value -- except that it does not move with the step size, which is
+        // exactly the point: an agent whose schedule says 08:31 must decide on the same pass
+        // whatever the frame rate.
+        const double nominalHours = static_cast<double>(config_.startHour) + nominalSeconds / 3600.0;
+        const float minuteOfDay = static_cast<float>(std::fmod(nominalHours, 24.0) * 60.0);
+        const int nominalDay = static_cast<int>(nominalHours / 24.0);
 
         // The day rolls over at four in the morning rather than at midnight, because a simulated
         // day should turn over when the city is at its emptiest and not in the middle of the shift
         // workers' evening.
-        const int dayKey = clock_.day() * 2 + (minuteOfDay >= 240.0f ? 1 : 0);
+        const int dayKey = nominalDay * 2 + (minuteOfDay >= 240.0f ? 1 : 0);
         if (dayKey != lastDayReset_)
         {
             lastDayReset_ = dayKey;
@@ -535,7 +543,12 @@ namespace CnaCity
         // half the city simply never considered its schedule again. The population on foot at the
         // morning peak fell from six thousand to two, which is the kind of change that looks like
         // tuning and is a bug.
-        const std::uint32_t stride = decisionPass_++ % kDecisionStride;
+        // Read, never advanced: `Step` owns this counter, because the pass index is now derived
+        // from simulated time rather than from how many times this function has been called.
+        // Incrementing it here as well made it move by two a pass, so half the passes were skipped
+        // and the stride sequence became 0, 2, 4, 6 -- which is the exact defect the comment below
+        // describes, reintroduced by the fix for a different one.
+        const auto stride = static_cast<std::uint32_t>(decisionPass_ % kDecisionStride);
         jobs_->ParallelFor(count, 2048, [&](std::size_t begin, std::size_t end) {
             for (std::size_t i = begin; i < end; ++i)
             {
@@ -685,6 +698,35 @@ namespace CnaCity
 
         const std::uint32_t wanted = std::min<std::uint32_t>(wantsCount_.load(),
                                                              static_cast<std::uint32_t>(count));
+        // Sorted before anything is planned, because the gather above is parallel: each worker
+        // claims slots with one atomic increment, so the *order* of this list is whichever thread
+        // got there first and therefore depends on how many threads there are. Planning consumes
+        // the list in order under a budget, so an unsorted list makes `--threads` decide which
+        // citizens travel -- a city that is not reproducible across machines, which is most of
+        // what the determinism claim is for. A few thousand indices is a sort nobody can measure.
+        {
+            const auto begin = wantsToLeave_.begin();
+            std::vector<std::uint32_t> order(wanted);
+            for (std::uint32_t k = 0; k < wanted; ++k) order[k] = k;
+            std::sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) {
+                return wantsToLeave_[a] < wantsToLeave_[b];
+            });
+            std::vector<std::uint32_t> agentsSorted(wanted);
+            std::vector<std::uint32_t> destinationSorted(wanted);
+            std::vector<std::uint8_t> activitySorted(wanted);
+            std::vector<std::uint8_t> flagSorted(wanted);
+            for (std::uint32_t k = 0; k < wanted; ++k)
+            {
+                agentsSorted[k] = wantsToLeave_[order[k]];
+                destinationSorted[k] = wantsDestination_[order[k]];
+                activitySorted[k] = wantsActivity_[order[k]];
+                flagSorted[k] = wantsFlag_[order[k]];
+            }
+            std::copy(agentsSorted.begin(), agentsSorted.end(), begin);
+            std::copy(destinationSorted.begin(), destinationSorted.end(), wantsDestination_.begin());
+            std::copy(activitySorted.begin(), activitySorted.end(), wantsActivity_.begin());
+            std::copy(flagSorted.begin(), flagSorted.end(), wantsFlag_.begin());
+        }
         const std::uint32_t budget = std::min(wanted, kPlanBudgetPerTick);
         stats_.tripsDeferred = wanted - budget;
         // Rotating where the budget starts stops low agent indices from always winning the queue,
@@ -1009,6 +1051,11 @@ namespace CnaCity
                     agents_.mode[agent] = static_cast<std::uint8_t>(Mode::Riding);
                     agents_.metroTrain[agent] = t;
                     agents_.metroBoard[agent] = kNoIndex;
+                    // As with the buses: `riding_` predates this pass, so without moving them here
+                    // a passenger who boards this tick is drawn on the platform the train has
+                    // already left.
+                    agents_.position[agent] = metro_.PointOnLine(train.line, train.position);
+                    agents_.speed[agent] = train.speed;
                     ++train.onboard;
                     continue;
                 }
@@ -1197,6 +1244,14 @@ namespace CnaCity
                     agents_.mode[agent] = static_cast<std::uint8_t>(Mode::OnBus);
                     agents_.busVehicle[agent] = b;
                     agents_.busBoard[agent] = kNoIndex;
+                    // Moved onto the bus now rather than by the riding pass below. That pass walks
+                    // `onBus_`, which was collected before this one ran, so a passenger who boards
+                    // this tick is not in it -- and spends the rest of the tick standing on the
+                    // pavement while the simulation believes they are aboard.
+                    float heading = 0.0f;
+                    buses_.Placement(bus, agents_.position[agent], heading);
+                    agents_.heading[agent] = heading;
+                    agents_.speed[agent] = bus.speed;
                     ++bus.onboard;
                     continue;
                 }
@@ -1302,49 +1357,87 @@ namespace CnaCity
 
     void Simulation::Step(float simulatedSeconds)
     {
-        System::Diagnostics::Stopwatch watch;
+        // A fixed-timestep loop, and it is the determinism claim rather than an optimisation.
+        //
+        // The old shape advanced the clock and the weather by the whole frame, ran the decisions
+        // if enough had accumulated, and *then* sub-stepped the movement. Every one of those had
+        // its own relationship to the frame length, so the same simulated second played out
+        // differently at 60 fps and at 120: the clock accumulated a different rounding error, the
+        // weather's fog term saw a different hour inside its own smoothing, and a citizen who
+        // decided to leave at t = 1.5 started walking at 1.5 on one machine and 2.0 on the other.
+        //
+        // Now the frame's elapsed time is banked and the world advances in whole ticks of
+        // kMovementStep. A tick is identical whatever asked for it, the decision period is an
+        // exact multiple of it, and the only thing a frame rate can change is how many ticks run
+        // in one call.
         stats_.tripsStarted = 0;
         stats_.routeFailures = 0;
         stats_.walkMs = stats_.crowdMs = stats_.trafficMs = stats_.metroMs = stats_.busMs = 0.0;
+        stats_.decisionMs = 0.0;
 
-        simulatedSeconds_ += static_cast<double>(simulatedSeconds);
-        decisionEpoch_ = static_cast<std::uint32_t>(simulatedSeconds_ * 2.0);
-        clock_.Advance(simulatedSeconds);
-        weather_.Update(simulatedSeconds, clock_.hour());
+        stepAccumulator_ += static_cast<double>(simulatedSeconds);
+        // Past the sub-step ceiling the time scale has outrun the simulation and the surplus is
+        // dropped rather than paid off over the next frames, which would turn one slow frame into
+        // a slow minute.
+        const double ceiling = static_cast<double>(kMovementStep) * kMaxSubSteps;
+        if (stepAccumulator_ > ceiling) stepAccumulator_ = ceiling;
 
-        // Decisions run on simulated time, not on frames.
-        //
-        // A citizen's schedule turns over on the scale of minutes, so re-examining it more often
-        // than once a simulated second buys nothing -- and tying it to the frame meant that a
-        // machine drawing at 120 fps paid four times as much for the same simulated day as one
-        // drawing at 30. The activity histogram the HUD reads rides along with it for the same
-        // reason: it is a full pass over the population and nobody can see it change faster.
-        decisionAccumulator_ += simulatedSeconds;
+        int ticks = 0;
+        while (stepAccumulator_ >= static_cast<double>(kMovementStep))
+        {
+            stepAccumulator_ -= static_cast<double>(kMovementStep);
+            FixedTick();
+            ++ticks;
+        }
+        stats_.subSteps = std::max(1, ticks);
+    }
+
+    void Simulation::FixedTick()
+    {
+        System::Diagnostics::Stopwatch watch;
+
+        simulatedSeconds_ += static_cast<double>(kMovementStep);
+        clock_.setSimulatedSeconds(config_.startHour, simulatedSeconds_);
+
+        // The weather's smoothing is exponential, which composes exactly under subdivision -- but
+        // its fog term is driven by the hour of day *inside* that smoothing, so it has to be
+        // advanced on the same grid as everything else or one update of a second and two of half a
+        // second give different fog. Different fog is a different walking aversion, which flips
+        // one citizen's mode choice, which is a different city.
+        weather_.Update(kMovementStep, clock_.hour());
+
+        // Decisions on their own grid, an exact multiple of the tick. A citizen's schedule turns
+        // over on the scale of minutes, so re-examining it every tick buys nothing -- and the
+        // activity histogram the HUD reads rides along with it, because it is a full pass over the
+        // population and nobody can see it change faster.
         watch.Restart();
-        if (decisionAccumulator_ >= 1.5f)
+        const auto targetPass =
+            static_cast<std::uint64_t>(simulatedSeconds_ / static_cast<double>(kDecisionPeriod));
+        bool decided = false;
+        while (decisionPass_ < targetPass)
         {
+            ++decisionPass_;
+            const double nominalSeconds = static_cast<double>(decisionPass_) *
+                                          static_cast<double>(kDecisionPeriod);
+            decisionEpoch_ = static_cast<std::uint32_t>(nominalSeconds * 2.0);
             CollectModeLists(true);
-            RunDecisions(decisionAccumulator_);
-            decisionAccumulator_ = 0.0f;
+            RunDecisions(kDecisionPeriod, nominalSeconds);
+            decided = true;
         }
-        else
-        {
-            CollectModeLists(false);
-        }
-        stats_.decisionMs = ElapsedMs(watch);
+        stats_.decisionMs += ElapsedMs(watch);
 
-        // One decision pass, several movement passes. Sub-stepping the decisions too would cost
-        // four times as much and change nothing: nobody's schedule turns over inside half a second.
-        const int subSteps = Clamp(static_cast<int>(std::ceil(simulatedSeconds / kMovementStep)),
-                                   1, kMaxSubSteps);
-        const float h = simulatedSeconds / static_cast<float>(subSteps);
-        for (int i = 0; i < subSteps; ++i)
-        {
-            if (i > 0) CollectModeLists(false);
-            StepMovement(h);
-        }
-        stats_.subSteps = subSteps;
+        StepMovement(kMovementStep);
 
+        // Collected *after* movement, so that what a caller sees when Step returns is what the
+        // world actually is. Movement is what changes a mode -- a walker reaches a platform, a
+        // passenger gets off a bus -- so lists built before it are already wrong by the time
+        // anyone can read them, and the renderer was drawing citizens who had gone underground a
+        // moment earlier as though they were still on the pavement. The next tick's movement uses
+        // these, which is the same lists it would have built for itself.
+        // The activity histogram rides along only on a decision tick: it is a second full pass
+        // over the population and it feeds one line of the HUD, which nobody can read changing
+        // three times a second. Running it every tick cost a third of the whole simulation.
+        CollectModeLists(decided);
         ++tick_;
     }
 

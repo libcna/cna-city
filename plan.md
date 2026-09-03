@@ -161,3 +161,83 @@ could see the city through, and the buses did not exist as a service at all.
   alternative is a second vehicle class in the IDM arrays, and that is a larger change than this
   round of work. What is visible from the pavement -- a bus stopping at a red, pulling in, dwelling
   and pulling out -- is modelled; what is not is a bus blocking the lane it is stopped in.
+
+---
+
+## P11 — A test suite, and the five defects it found on the first run
+
+Added 2026-09-03. The audit that produced this file missed the largest hole in the repository:
+thirteen thousand lines of simulation with no test target, no test suite, and `static_assert` as the
+only assertion mechanism anywhere in `src/`.
+
+That matters more here than in an ordinary program, because this one is a benchmark. **A simulation
+that quietly stops moving anybody gets faster.** Every defect in the table in
+[`ARCHITECTURE.md`](ARCHITECTURE.md) did exactly that, and three of them — pedestrians who never
+arrived, citizens who never left home, and half the population no longer making decisions — looked
+like tuning rather than like breakage.
+
+- [x] **P11.1 A test target.** GoogleTest, reused from `../cnanext/vendor/googletest` rather than
+  fetched a second time. The simulation half of the program becomes a library (`cna-city-sim`) so
+  the tests can link the city without linking a renderer — the same split `--headless` already
+  draws. *Accept:* `ctest` runs, and 71 cases across twelve suites pass.
+
+- [x] **P11.2 Regression tests for every defect on record.** Named for the defect rather than for
+  the function, because that is what they are for: `PedestriansActuallyArriveAtALargeTimeScale`,
+  `MostOfTheCityLeavesHomeDuringTheMorningPeak`, `TheDecisionStrideReachesEveryAgent`,
+  `NoTwoVehiclesOccupyTheSamePlaceInTheSameLane`, `DriversDoNotTeleportToTheirDestination`,
+  `PassengersBoardRideAndAlightRatherThanWaitingForever`, `DanglingStubsArePrunedAway`,
+  `BlocksAreBoundedAndPlausiblySized`, `NoPrivateDriverIsGivenABus`.
+
+### What it found, on the first run
+
+Five live defects, none of which anyone had noticed:
+
+- [x] **P11.3 Every pitched roof in the city was inside out.** The same class of mistake as the
+  flat roofs, and far harder to see: from a street-level camera you look *up* at a two-storey
+  house, and an inverted slope is visible from underneath. The suburbs were correct in every
+  eye-level screenshot and missing from every aerial one, leaving a scatter of gable slivers where
+  the roofs should have been. Found by a unit test, confirmed by tinting the tile material magenta
+  and looking down at the city.
+
+- [x] **P11.4 Vehicles were held at a negative distance along their segment.** The stop line is set
+  back by the half-width of the road being crossed, and the graph is cut at every intersection, so
+  a short link between two close junctions is shorter than its own stop line is deep. Such a
+  vehicle was parked six metres *before* the start of its segment — which is to say in the middle
+  of the junction it had just left.
+
+- [x] **P11.5 Buses drove through each other, and then deadlocked when that was fixed.** The
+  look-ahead was applied and then overwritten by the stop-approach logic on the next line; the
+  repaired version treated a bus clearly *behind* as ambiguous and had two buses each yield to the
+  other, nine metres apart, for the rest of the day. Both are now tested: zero same-route
+  overlaps, and no bus stationary for more than 90 s without dwelling or waiting at a signal.
+
+- [x] **P11.6 The same seed produced a different city at a different frame rate.** Three separate
+  causes, and the claim in the README had been false since it was written. The decision pass ran
+  when an accumulator crossed a threshold, so it happened at t = 2.0 at one step size and t = 1.5
+  at another; `WorldClock::Advance` added a float to a float, and 2 400 additions of 1/7200 land
+  two seconds away from 1 200 additions of 1/3600; and the weather's fog term reads the hour of day
+  *inside* its own exponential smoothing, so it does not compose under subdivision.
+
+- [x] **P11.7 The same seed produced a different city on a different number of threads.** The list
+  of citizens who want to leave is gathered in parallel with an atomic index, so its *order* is
+  whichever worker got there first — and planning consumes it in order under a budget. `--threads`
+  was deciding which citizens travelled.
+
+P11.6 and P11.7 together are why `Step` is now a fixed-timestep loop: the frame's elapsed time is
+banked and the world advances in whole ticks of `kMovementStep`, with the decision period an exact
+multiple of it. A tick is identical whatever asked for it, and the only thing a frame rate can
+change is how many run in one call. That is also the precondition for everything else worth doing
+here — checksums, replay and snapshots are all statements about a world that advances the same way
+twice.
+
+- [x] **P11.8 The mode lists were stale by the time anyone could read them.** They were collected
+  before movement, and movement is what changes a mode, so the renderer drew citizens who had gone
+  underground a moment earlier as though they were still on the pavement.
+
+### Known and not asserted
+
+- **Buses on converging routes still overlap occasionally.** Along a route the look-ahead is exact
+  and the suite asserts zero overlaps. Across routes it is not: two services meeting on a shared
+  arterial from different streets see each other late, a few dozen moments a simulated hour, never
+  closer than four metres. That residual is bounded by the test rather than asserted away, and
+  closing it properly means putting the fleet in the IDM arrays.

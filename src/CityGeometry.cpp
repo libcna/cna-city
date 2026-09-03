@@ -17,43 +17,6 @@ namespace CnaCity
     {
         constexpr float kPi = 3.14159265358979323846f;
 
-        /**
-         * @brief One quad of an enclosure, wound so that it is visible from @p interior.
-         *
-         * CNA's rule is a single rule -- a triangle is drawn when its winding normal points away
-         * from the camera -- and it is still the easiest thing in this program to get wrong,
-         * because the sign flips with which side of the surface you are standing on and a mirrored
-         * copy of a correct quad is an incorrect one. The metro was built out of hand-wound quads
-         * and four of the six faces of every tunnel were inside out: from a train you looked
-         * through the wall at the city, and from the platform you looked through the roof at the
-         * sky.
-         *
-         * So no caller states an order any more. It states a point that is inside the space being
-         * enclosed, and both the winding and the shading normal -- which points the opposite way,
-         * back into the space -- are derived from that. It is one cross product per quad at
-         * generation time and it makes the whole class of bug unrepresentable.
-         */
-        void AddFacet(MeshData& mesh, Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3,
-                      Vector3 interior, Vec2 uvMin, Vec2 uvMax)
-        {
-            const Vector3 e1(v1.X - v0.X, v1.Y - v0.Y, v1.Z - v0.Z);
-            const Vector3 e2(v2.X - v0.X, v2.Y - v0.Y, v2.Z - v0.Z);
-            Vector3 winding(e1.Y * e2.Z - e1.Z * e2.Y, e1.Z * e2.X - e1.X * e2.Z,
-                            e1.X * e2.Y - e1.Y * e2.X);
-            const Vector3 toInterior(interior.X - v0.X, interior.Y - v0.Y, interior.Z - v0.Z);
-            if (winding.X * toInterior.X + winding.Y * toInterior.Y + winding.Z * toInterior.Z > 0.0f)
-            {
-                std::swap(v0, v3);
-                std::swap(v1, v2);
-                winding = Vector3(-winding.X, -winding.Y, -winding.Z);
-            }
-            const float length = std::sqrt(winding.X * winding.X + winding.Y * winding.Y +
-                                           winding.Z * winding.Z);
-            const float scale = length > 1e-6f ? -1.0f / length : 0.0f;
-            mesh.AddQuad(v0, v1, v2, v3,
-                         Vector3(winding.X * scale, winding.Y * scale, winding.Z * scale),
-                         uvMin, Vec2(uvMax.X - uvMin.X, uvMax.Y - uvMin.Y));
-        }
 
         /// Heights, in metres, of the layers that share the ground plane. They are separated by
         /// centimetres rather than by a depth-bias trick because a city seen from four hundred
@@ -509,30 +472,30 @@ namespace CnaCity
                 // Floor, roof and the two side walls. Every one of them is handed to AddFacet with
                 // a point known to be inside the tube, so none of them can be wound inside out --
                 // which four of the six faces of the old shell were, independently.
-                AddFacet(floor, at(false, kMetroWallNear, kMetroTrackBed),
+                floor.AddFacet(at(false, kMetroWallNear, kMetroTrackBed),
                          at(true, kMetroWallNear, kMetroTrackBed),
                          at(true, kMetroWallFar, kMetroTrackBed),
                          at(false, kMetroWallFar, kMetroTrackBed), inside,
                          Vec2(u0, 0.0f), Vec2(u1, (kMetroWallFar - kMetroWallNear) / 4.0f));
-                AddFacet(mesh, at(false, kMetroWallNear, kMetroTunnelRoof),
+                mesh.AddFacet(at(false, kMetroWallNear, kMetroTunnelRoof),
                          at(true, kMetroWallNear, kMetroTunnelRoof),
                          at(true, kMetroWallFar, kMetroTunnelRoof),
                          at(false, kMetroWallFar, kMetroTunnelRoof), inside,
                          Vec2(u0, 0.0f), Vec2(u1, (kMetroWallFar - kMetroWallNear) / 4.0f));
                 for (const float t : {kMetroWallNear, kMetroWallFar})
-                    AddFacet(mesh, at(false, t, kMetroTrackBed), at(true, t, kMetroTrackBed),
+                    mesh.AddFacet(at(false, t, kMetroTrackBed), at(true, t, kMetroTrackBed),
                              at(true, t, kMetroTunnelRoof), at(false, t, kMetroTunnelRoof), inside,
                              Vec2(u0, 0.0f), Vec2(u1, wallV));
 
                 // A raised walkway down the side away from the platform -- the evacuation path a
                 // real running tunnel has, and the thing that stops the near side of the tube
                 // reading as a flat wall meeting a flat floor.
-                AddFacet(floor, at(false, kMetroWallNear, kMetroWalkway),
+                floor.AddFacet(at(false, kMetroWallNear, kMetroWalkway),
                          at(true, kMetroWallNear, kMetroWalkway),
                          at(true, kMetroPlatformEdge * -0.4f, kMetroWalkway),
                          at(false, kMetroPlatformEdge * -0.4f, kMetroWalkway), inside,
                          Vec2(u0, 0.0f), Vec2(u1, 0.6f));
-                AddFacet(floor, at(false, kMetroPlatformEdge * -0.4f, kMetroTrackBed),
+                floor.AddFacet(at(false, kMetroPlatformEdge * -0.4f, kMetroTrackBed),
                          at(true, kMetroPlatformEdge * -0.4f, kMetroTrackBed),
                          at(true, kMetroPlatformEdge * -0.4f, kMetroWalkway),
                          at(false, kMetroPlatformEdge * -0.4f, kMetroWalkway), inside,
@@ -544,7 +507,7 @@ namespace CnaCity
                 // fittings would cost a draw call per station.
                 MeshData& rails = meshFor(mid, CityMaterial::MetroRail);
                 for (const float t : {-0.72f, 0.72f})
-                    AddFacet(rails, at(false, t - 0.075f, kMetroRailTop),
+                    rails.AddFacet(at(false, t - 0.075f, kMetroRailTop),
                              at(true, t - 0.075f, kMetroRailTop),
                              at(true, t + 0.075f, kMetroRailTop),
                              at(false, t + 0.075f, kMetroRailTop), inside,
@@ -552,7 +515,7 @@ namespace CnaCity
 
                 MeshData& strip = meshFor(mid, CityMaterial::TunnelLight);
                 for (const float t : {-0.9f, kMetroPlatformEdge + 2.2f})
-                    AddFacet(strip, at(false, t - 0.30f, kMetroTunnelRoof - 0.05f),
+                    strip.AddFacet(at(false, t - 0.30f, kMetroTunnelRoof - 0.05f),
                              at(true, t - 0.30f, kMetroTunnelRoof - 0.05f),
                              at(true, t + 0.30f, kMetroTunnelRoof - 0.05f),
                              at(false, t + 0.30f, kMetroTunnelRoof - 0.05f), inside,
@@ -570,7 +533,7 @@ namespace CnaCity
                     i == 0 ? points[1] : points[points.size() - 2],
                     kMetroDepth + (kMetroTunnelRoof + kMetroTrackBed) * 0.5f);
                 MeshData& mesh = meshFor(p, CityMaterial::MetroTunnel);
-                AddFacet(mesh, ToWorld(p + rib * kMetroWallNear, kMetroDepth + kMetroTrackBed),
+                mesh.AddFacet(ToWorld(p + rib * kMetroWallNear, kMetroDepth + kMetroTrackBed),
                          ToWorld(p + rib * kMetroWallFar, kMetroDepth + kMetroTrackBed),
                          ToWorld(p + rib * kMetroWallFar, kMetroDepth + kMetroTunnelRoof),
                          ToWorld(p + rib * kMetroWallNear, kMetroDepth + kMetroTunnelRoof), inside,
@@ -600,12 +563,12 @@ namespace CnaCity
                 return ToWorld(base + side * t, kMetroDepth + y);
             };
             // The platform top, and the edge face a passenger sees from the train.
-            AddFacet(slab, corner(a, kMetroPlatformEdge, kMetroPlatform),
+            slab.AddFacet(corner(a, kMetroPlatformEdge, kMetroPlatform),
                      corner(b, kMetroPlatformEdge, kMetroPlatform),
                      corner(b, back, kMetroPlatform), corner(a, back, kMetroPlatform),
                      Vector3(inside.X, inside.Y - 6.0f, inside.Z),
                      Vec2(0.0f, 0.0f), Vec2(kMetroPlatformHalfLength * 0.5f, 1.6f));
-            AddFacet(mesh, corner(a, kMetroPlatformEdge, kMetroTrackBed),
+            mesh.AddFacet(corner(a, kMetroPlatformEdge, kMetroTrackBed),
                      corner(b, kMetroPlatformEdge, kMetroTrackBed),
                      corner(b, kMetroPlatformEdge, kMetroPlatform),
                      corner(a, kMetroPlatformEdge, kMetroPlatform), inside,
@@ -613,7 +576,7 @@ namespace CnaCity
             // Both ends of the slab, so it reads as a platform that stops rather than a floor that
             // is simply missing beyond it.
             for (const Vec2& endPoint : {a, b})
-                AddFacet(mesh, corner(endPoint, kMetroPlatformEdge, kMetroTrackBed),
+                mesh.AddFacet(corner(endPoint, kMetroPlatformEdge, kMetroTrackBed),
                          corner(endPoint, back, kMetroTrackBed),
                          corner(endPoint, back, kMetroPlatform),
                          corner(endPoint, kMetroPlatformEdge, kMetroPlatform), inside,
@@ -622,7 +585,7 @@ namespace CnaCity
             // The platform edge's warning line, which is the one thing that says "this is a
             // platform" from the far end of a train.
             MeshData& marking = meshFor(station.position, CityMaterial::RoadMarking);
-            AddFacet(marking, corner(a, kMetroPlatformEdge + 0.10f, kMetroPlatform + 0.012f),
+            marking.AddFacet(corner(a, kMetroPlatformEdge + 0.10f, kMetroPlatform + 0.012f),
                      corner(b, kMetroPlatformEdge + 0.10f, kMetroPlatform + 0.012f),
                      corner(b, kMetroPlatformEdge + 0.55f, kMetroPlatform + 0.012f),
                      corner(a, kMetroPlatformEdge + 0.55f, kMetroPlatform + 0.012f),

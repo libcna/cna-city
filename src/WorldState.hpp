@@ -26,6 +26,17 @@ namespace CnaCity
         /** @brief Advances by @p simulatedSeconds; the scale is applied by the caller's loop. */
         void Advance(float simulatedSeconds);
 
+        /**
+         * @brief Sets the clock to @p startHour plus @p simulatedSeconds, without accumulating.
+         *
+         * `Advance` adds a float to a float, and a thousand additions of 1/3600 do not land where
+         * one addition of 1000/3600 does. Two seconds of drift over twenty simulated minutes is
+         * enough to move a citizen's departure across a schedule boundary, so the same seed gave a
+         * different city at a different frame rate -- through nothing but rounding. The clock is a
+         * pure function of the seconds it has been asked for, so this computes it instead.
+         */
+        void setSimulatedSeconds(float startHour, double simulatedSeconds);
+
         [[nodiscard]] float hour() const { return hour_; }
         [[nodiscard]] int day() const { return day_; }
         [[nodiscard]] float timeScale() const { return scale_; }

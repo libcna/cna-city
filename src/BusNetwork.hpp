@@ -148,5 +148,8 @@ namespace CnaCity
         std::vector<BusRoute> routes_;
         std::vector<Bus> buses_;
         std::vector<Occupancy> occupancy_;
+        /// The buses standing at a stop this tick, so the two checks that only care about those
+        /// scan a handful rather than the whole fleet.
+        std::vector<std::uint32_t> dwelling_;
     };
 }

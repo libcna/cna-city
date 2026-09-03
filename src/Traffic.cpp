@@ -382,8 +382,15 @@ namespace CnaCity
 
                     // Never past the stop line, and never past the far node: crossing a junction
                     // is a decision, and decisions are made serially below.
-                    const float limit = mustStop ? segment.length - roadProfile.carriagewayHalfWidth
-                                                 : segment.length;
+                    // Clamped at zero: the setback is the half-width of the road being crossed,
+                    // and the graph is cut at every intersection, so a short link between two
+                    // close junctions can be shorter than its own stop line is deep. Without the
+                    // clamp such a vehicle is held at a negative distance along its segment --
+                    // which is to say parked in the middle of the junction it has just left.
+                    const float limit =
+                        mustStop
+                            ? std::max(0.0f, segment.length - roadProfile.carriagewayHalfWidth)
+                            : segment.length;
                     if (vehicle.s > limit)
                     {
                         vehicle.s = limit;
@@ -476,7 +483,7 @@ namespace CnaCity
                 }
             if (!clear)
             {
-                vehicle.s = segment.length - 0.3f;
+                vehicle.s = std::max(0.0f, segment.length - 0.3f);
                 vehicle.speed = 0.0f;
                 vehicle.blocked = 1;
                 vehicle.stall = 2;
