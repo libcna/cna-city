@@ -11,6 +11,10 @@
 # Output written by `cna-city --bench` and `--screenshot`.
 /bench-results/
 /shots/
+# ...except the renderer comparison, which is the evidence behind CNA-FINDINGS A9 and A11 rather
+# than a scratch screenshot. "Vulkan does not draw the same picture" is a claim about a picture,
+# and a finding whose evidence is not in the repository is a finding nobody else can check.
+!/shots/renderers/
 *.png
 *.csv
 *.log

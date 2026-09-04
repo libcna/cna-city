@@ -173,6 +173,10 @@ about alignment rather than about language:
                copy its input through instead of running.
 ```
 
+`shots/renderers/` holds the same frame from all three renderers, which is what this looks like
+rather than what it measures: the GL pair are indistinguishable, and the Vulkan frame arrives with
+a flat sky, unlit buildings, no shadows and an empty street.
+
 The blast radius is every pass that owns a shader, which is most of the engine layer.
 `CascadedShadowMap` decides its own availability from exactly this
 (`modules/graphics-ext/src/CascadedShadowMap.cpp:231`):
@@ -252,6 +256,9 @@ multi-stream draw is rejected before submission instead of rendering from stream
 `Instancing` believed SDL_GPU's inherited `true`, and a caller can put the answer on screen, which
 is what this program does. A missing feature that announces itself is not a defect. It is still a
 missing feature, which is why it is in this section.
+
+`shots/renderers/vulkan.png` is that frame, with the HUD line cna-city puts on it: `NOTE HARDWARE
+INSTANCING UNAVAILABLE ON THIS RENDERER -- PROPS, VEHICLES AND PEOPLE ARE NOT DRAWN`.
 
 **Suggested:** nothing beyond what REMED-GFX-201 already says. Recorded here so that "Vulkan draws
 no crowd" is a known limitation with a reference rather than a surprise for the next person who
