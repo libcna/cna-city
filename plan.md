@@ -858,3 +858,50 @@ configuration that is saturated by construction, and the supported city is clean
 soak drains to **20000 of 20000 citizens indoors, zero vehicles and zero route slots** every night.
 The regression test asserts the precise invariant (no two buses in one place) at the oversubscribed
 configuration and the outcome (nobody still aboard at three in the morning) at the ordinary one.
+
+---
+
+## P22 — Freezing the baseline
+
+The point of a baseline is to be able to say, later, whether a difference came from the thing being
+measured or from everything around it. So both halves are recorded: the exact commits of cna-city,
+CNA and sharp-runtime, the compiler and the build flags -- and a set of figures to compare.
+
+- [x] **P22.1 The frozen figures are world digests, not milliseconds.** A baseline of wall-clock
+  numbers freezes the machine it ran on: this one measures 0.43 ms and 1.25 ms for the same work
+  ten minutes apart depending on what else woke up, and a baseline that cries wolf is a baseline
+  people learn to ignore. A digest has no timing in it at all and changes only when the city does,
+  which makes `verify` a regression test with nothing to argue about. The timings stay in
+  `--report`, where a spread is printed beside every figure and a difference smaller than the
+  spread is not called a change.
+
+- [x] **P22.2 Six digests per scenario**, so a mismatch is a lead. City means the generator moved;
+  agents alone means the schedule or the steering; traffic alone the road model; transit alone the
+  metro or the buses; world alone the clock or the weather.
+
+- [x] **P22.3 Provenance beside the digests.** `environment.txt` exists so that "it changed" can be
+  answered with "because of what". Every line in it is a licence for a digest to differ.
+
+- [x] **P22.4 Two tiers.** `quick` is the generator and the oversubscribed transit network, a
+  couple of minutes, and belongs in CI on every commit -- between them they cover where every
+  defect found so far has actually been. `full` adds the hundred-thousand-citizen day and the
+  quarter-million sweep and is the better part of an hour, because `--checksum` runs every scenario
+  three times and the half-step re-run is twice the ticks on its own.
+
+- [x] **P22.5 A scenario is checked against itself before it is frozen.** `capture` refuses to
+  record one whose own re-runs -- at half the step size, and on a different worker count --
+  disagree. Freezing a number this build cannot reproduce twice would be worse than freezing
+  nothing.
+
+- [x] **P22.6 The failure path is tested rather than assumed.** Corrupting a recorded digest makes
+  `verify` name the scenario, name the part that moved, say what to do about it and exit 1. A
+  verifier that has only ever been seen passing is the same mistake as an invariant checker that
+  has only ever been seen passing, and P21 is the reason that sentence is in this file twice.
+
+### One thing this got wrong first
+
+`capture` wrote straight into `baseline/checksums.txt`, and the shell redirect truncates its target
+the moment the block starts. The first full capture was interrupted forty minutes in, and what it
+left behind was a baseline holding the four scenarios that had finished and silently missing the
+fifth -- a file that still verifies, and verifies the wrong thing. It now builds the file aside and
+moves it into place, so an interrupted capture leaves the previous baseline exactly as it was.

@@ -48,7 +48,11 @@ worse than freezing nothing.
 | `oversubscribed` | 4242 | 8 000 | 1.24 km | 24 h | 93 buses over 20 stops: the configuration that found the bus defects in P21 |
 | `morning-peak` | 20260902 | 100 000 | 3.3 km | 6 h | the peak, where the planner and the route pool are under most pressure |
 | `whole-day` | 20260902 | 100 000 | 3.3 km | 24 h | the headline: a full day at the population the project is named for |
-| `quarter-million` | 7 | 250 000 | 6.6 km | 6 h | past the point where the tick stops being about any one subsystem |
+| `quarter-million` | 7 | 250 000 | 3.3 km | 2 h | past the point where the tick stops being about any one subsystem |
+
+`full` is the better part of an hour, most of it `whole-day`: `--checksum` runs every scenario
+three times, and the half-step re-run is twice the ticks on its own. That is the price of a
+scenario that checks itself, and it is why the tiers exist.
 
 The first two are the `quick` tier. They are the ones fast enough to run on every commit, and
 between them they cover the generator and the transit model — which is where every defect found so

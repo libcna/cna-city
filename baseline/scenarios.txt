@@ -1,2 +1,5 @@
 generator|20260902|2000|1650|5|1h
 oversubscribed|4242|8000|620|3|24h
+morning-peak|20260902|100000|1650|5|6h
+whole-day|20260902|100000|1650|5|24h
+quarter-million|7|250000|1650|7|2h

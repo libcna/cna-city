@@ -34,7 +34,7 @@ oversubscribed|4242|8000|620|3|24h
 FULL_SCENARIOS="$QUICK_SCENARIOS"'
 morning-peak|20260902|100000|1650|5|6h
 whole-day|20260902|100000|1650|5|24h
-quarter-million|7|250000|3300|7|6h
+quarter-million|7|250000|1650|7|2h
 '
 
 action=${1:-verify}
@@ -48,9 +48,21 @@ esac
 [ -x "$BIN" ] || { echo "$0: $BIN is not built" >&2; exit 2; }
 
 sha() { git -C "$1" rev-parse HEAD 2>/dev/null || echo "unknown"; }
+
+# Reports uncommitted work, and separately how much of it the digests could possibly depend on.
+# "Three uncommitted files" is a useless warning when all three are markdown; it is a serious one
+# when any of them is under src/. A reader of this file needs to be able to tell those apart
+# without taking anybody's word for it.
 dirty() {
     n=$(git -C "$1" status --porcelain 2>/dev/null | wc -l)
-    [ "$n" = "0" ] && echo clean || echo "$n uncommitted files"
+    [ "$n" = "0" ] && { echo clean; return; }
+    code=$(git -C "$1" status --porcelain 2>/dev/null |
+           awk '{print $NF}' | grep -cE '^(src/|tests/|CMakeLists\.txt)' || true)
+    if [ "$code" = "0" ]; then
+        echo "$n uncommitted files, none under src/ or CMakeLists.txt"
+    else
+        echo "$n uncommitted files, $code OF THEM BUILD INPUTS -- these digests are not reproducible"
+    fi
 }
 
 write_environment() {
@@ -90,7 +102,23 @@ EOF
 case "$action" in
 capture)
     mkdir -p "$OUT"
-    write_environment > "$OUT/environment.txt"
+    # Written aside and moved into place, because the redirect below truncates its target the
+    # moment the block starts. A capture that is interrupted -- and the full tier is the better
+    # part of an hour, so sooner or later it will be -- would otherwise leave a baseline holding
+    # the scenarios that finished and silently missing the ones that did not. That happened while
+    # this script was being written, which is why the comment is here rather than a warning in the
+    # README: a truncated baseline is worse than no new baseline, because it still verifies.
+    tmp="$OUT/.checksums.partial"
+    trap 'rm -f "$tmp"' EXIT INT TERM
+    # Scenarios already recorded that this tier is not re-running are carried across rather than
+    # dropped. Without this, `capture quick` after a `capture full` silently deletes the three
+    # expensive scenarios and leaves a baseline that still verifies -- against a third of itself.
+    kept=$(if [ -f "$OUT/checksums.txt" ]; then
+               grep '^[a-z]' "$OUT/checksums.txt" | while read -r old_line; do
+                   old_name=${old_line%% *}
+                   echo "$scenarios" | cut -d'|' -f1 | grep -qx "$old_name" || echo "$old_line"
+               done
+           fi)
     {
         echo "# scenario city agents traffic transit world final"
         echo "# Reproduce one by hand:"
@@ -100,8 +128,14 @@ capture)
             echo "$line" | cut -d'|' -f1 | tr -d '\n' >&2; echo " ..." >&2
             run_scenario "$line"
         done
-    } > "$OUT/checksums.txt"
-    echo "$scenarios" | grep -v '^$' > "$OUT/scenarios.txt"
+        [ -n "$kept" ] && echo "$kept"
+    } > "$tmp"
+    mv "$tmp" "$OUT/checksums.txt"
+    # Written last, beside the digests it describes rather than before them.
+    write_environment > "$OUT/environment.txt"
+    # Always the whole table, not this tier's slice: this file documents what the scenarios *are*,
+    # so that any one of them can be reproduced by hand without reading the script.
+    echo "$FULL_SCENARIOS" | grep -v '^$' > "$OUT/scenarios.txt"
     echo "wrote $OUT/checksums.txt, $OUT/environment.txt and $OUT/scenarios.txt"
     ;;
 verify)

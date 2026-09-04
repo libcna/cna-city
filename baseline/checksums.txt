@@ -3,3 +3,6 @@
 #   ./build/cna-city --checksum --seed S --agents N --size H --metro M --simulate D
 generator 49f2c06da5300a2e 998c42b1ea2b2160 db927d654f437296 aa365bae1d1cd25e bd4758963f5cd02d c626b0a153c4c918
 oversubscribed b75c556cd0dfdb52 0be16292702714ca 6262b22bee76b2ed 112c61126116ce41 13aa84e433420c7a 7b3a7cd4593f9b49
+morning-peak 49f2c06da5300a2e 80cabe2968094dda ab2310a310c17b6a b9ed72f1f2e366c2 7e4bed385976a168 96f4d5bf3383ad95
+whole-day 49f2c06da5300a2e da528d8d686cfe39 712c62cf7036bf64 cc117ad92b7a7032 b089ac3e7e9269a6 cc0fbd4b8f3f56aa
+quarter-million 5cb59beda3e552c5 46f127750867c4c0 e1edb04d1e344630 6944dc088ae090cb 9df2084bb33b92e2 a2d0b3184d8c515b
