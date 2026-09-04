@@ -29,8 +29,11 @@ alone means the clock or the weather.
 ## What is recorded
 
 - `environment.txt` — the commits of cna-city, cnanext and sharp-runtimenext, the compiler, the
-  build type, the renderer, and when it was taken. Every line in it is a reason a digest is allowed
-  to differ, and the file exists so that "it changed" can be answered with "because of what".
+  build type, the renderer, when it was taken, and which scenarios that capture actually re-ran.
+  Every line in it is a reason a digest is allowed to differ, and the file exists so that "it
+  changed" can be answered with "because of what". It also says plainly whether any uncommitted
+  file could have affected a digest, because uncommitted markdown and an uncommitted `src/` are
+  different facts and a reader should not have to take anybody's word for which it was.
 - `checksums.txt` — one line per scenario, six digests each.
 - `scenarios.txt` — the scenarios as command-line fields, so any one of them can be reproduced by
   hand without reading the script.
@@ -66,6 +69,10 @@ they never change; it is that a change is never a surprise. Moving one means:
 1. a line in the log below saying which change moved it, which parts moved, and why that is right;
 2. `scripts/baseline.sh capture full`;
 3. both in the same commit as the change that caused it.
+
+`capture quick` carries the three expensive scenarios across rather than deleting them, and names
+them in `environment.txt` as *carried*. A carried digest was not re-checked by that capture. After
+a change that could move one, capture the tier that contains it.
 
 ## Log
 

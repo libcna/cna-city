@@ -67,6 +67,11 @@ dirty() {
 
 write_environment() {
     cat <<EOF
+# Scenarios re-run by this capture: $rerun
+# Scenarios carried across from an earlier one: ${carried:-none}
+# A carried scenario's digest was not re-checked by this capture. After a change that could move
+# it, capture the tier that contains it -- otherwise this file vouches for a figure it did not
+# produce, which is the quiet version of the mistake that made an interrupted capture dangerous.
 # What these digests were produced by. Every line here is a reason a digest is allowed to differ.
 cna-city         $(sha .) ($(dirty .))
 cnanext          $(sha "$CNA") ($(dirty "$CNA"))
@@ -113,6 +118,7 @@ capture)
     # Scenarios already recorded that this tier is not re-running are carried across rather than
     # dropped. Without this, `capture quick` after a `capture full` silently deletes the three
     # expensive scenarios and leaves a baseline that still verifies -- against a third of itself.
+    rerun=$(echo "$scenarios" | grep -v '^$' | cut -d'|' -f1 | tr '\n' ' ')
     kept=$(if [ -f "$OUT/checksums.txt" ]; then
                grep '^[a-z]' "$OUT/checksums.txt" | while read -r old_line; do
                    old_name=${old_line%% *}
@@ -131,6 +137,7 @@ capture)
         [ -n "$kept" ] && echo "$kept"
     } > "$tmp"
     mv "$tmp" "$OUT/checksums.txt"
+    carried=$(echo "$kept" | grep -v '^$' | cut -d' ' -f1 | tr '\n' ' ')
     # Written last, beside the digests it describes rather than before them.
     write_environment > "$OUT/environment.txt"
     # Always the whole table, not this tier's slice: this file documents what the scenarios *are*,
