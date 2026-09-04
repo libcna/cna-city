@@ -4,12 +4,15 @@ CNA City exists to push the CNA runtime until something bends and then say preci
 This file is that list.
 
 Every item below was **checked against CNA's own source before it was written down**, and the
-check is quoted. Three things that looked like engine defects turned out to be this program's
-mistakes; they are in §C rather than deleted, because a finding list that only contains hits is not
-a measurement, and because somebody will otherwise chase them into the engine.
+check is quoted. Four things that looked like engine defects were checked and were not: two were this program's own
+mistakes (C1, C4) and two were suspicions the source cleared (C2, C3). They are in §C rather than
+deleted, because a finding list that only contains hits is not a measurement, and because somebody
+will otherwise chase them into the engine.
 
-Measured against `cnanext` and `sharp-runtimenext` as of 2026-09-03, `CNA_GRAPHICS_RENDERER=OPENGLES3`
-(EasyGL) on GL ES 3.2, Mesa 25.0.7, AMD Radeon 780M.
+Measured against `cnanext` `c9d8bfd` and `sharp-runtimenext` `c3fbb95`, on GL ES 3.2 / GL 4.6 core /
+Vulkan 1.4 (RADV), Mesa 25.0.7, AMD Radeon 780M. Most of the list was found through
+`CNA_GRAPHICS_RENDERER=OPENGLES3` (EasyGL); A9 was found by running the same city through
+OPENGLES3, OPENGL33 and VULKAN and comparing what came out.
 
 ---
 
@@ -140,6 +143,62 @@ switch that turns on an artefact.
 *Diagnosed by elimination: the band survives with light shafts off, survives with height fog on,
 and disappears the moment the volumetric density goes to zero. At `--quality low`, which enables
 none of the chain, it was never there.*
+
+### A9. The engine layer writes its shaders in GLSL. The Vulkan backend's shader entry point takes SPIR-V.
+
+Two layers of the same engine disagree about what a shader source *is*, and the disagreement is
+total: on `CNA_GRAPHICS_RENDERER=VULKAN` **every CNAEXT pass that compiles a shader fails to
+compile**, and the frame is drawn without shadows, without the depth-normal prepass, without the
+atmospheric sky and without any of the post chain.
+
+The contract, on the engine side --
+`modules/graphics-ext/include/CNA/Graphics/ShaderEffectFactory.hpp`:
+
+> `@param vertexSource     GLSL vertex source, used only on the first request for @p name.`
+
+The contract, on the Vulkan side --
+`modules/renderers/vulkan/src/VulkanRenderer.cpp:3468`:
+
+> `// vertSpv and fragSpv contain raw SPIR-V bytecode (must be 4-byte aligned size).`
+
+and three lines below it, `VulkanEffectRenderer::CompileProgram` rejects anything whose length is
+not a multiple of four. GLSL text almost never is, so the failure is near-total and its message is
+about alignment rather than about language:
+
+```
+[ShaderEffect] Compile error: SPIR-V size must be a multiple of 4 bytes
+[INFO][RENDER] DepthNormalPrepass: its shader did not compile on the VULKAN renderer, so the pass
+               will copy its input through instead of running.
+[INFO][RENDER] AtmosphericSky: its shader did not compile on the VULKAN renderer, so the pass will
+               copy its input through instead of running.
+```
+
+The blast radius is every pass that owns a shader, which is most of the engine layer.
+`CascadedShadowMap` decides its own availability from exactly this
+(`modules/graphics-ext/src/CascadedShadowMap.cpp:231`):
+
+```cpp
+supported_ = casterEffect_ != nullptr && casterEffect_->IsEffectValid();
+```
+
+so shadows report themselves unavailable on Vulkan for the same single reason. Measured over four
+viewpoints: `shadow_ms` is 0.00 on every one of them, `passes.csv` is empty where the GL renderers
+record five post passes each, and 61 of the 483 draw calls are simply absent.
+
+**What is good about it, and worth keeping.** Nothing here crashes and nothing here lies. Each pass
+logs precisely what happened and why, in the words A5 asked for -- "its shader did not compile on
+the VULKAN renderer, so the pass will copy its input through instead of running" is exactly the
+diagnostic this file said was missing everywhere but transparency. `CascadedShadowMap` says the
+same thing in its own log line and reports `isSupported() == false` so a caller can react. The
+degradation is graceful and legible. What is missing is that it should not be happening at all.
+
+**Suggested:** the engine layer authors one shader language, so the Vulkan backend needs to accept
+it -- either by compiling GLSL to SPIR-V at that boundary (the other renderers all compile GLSL for
+their own APIs) or by having `ShaderEffect` carry per-renderer sources the way descriptors already
+carry per-renderer identities. Failing both, `ShaderEffectFactory`'s documented parameter is wrong
+for one of the shipped renderers and should say so. The alignment message should also name the
+actual problem: "this renderer expects SPIR-V, not GLSL" is a five-minute fix for whoever hits it
+next, and "SPIR-V size must be a multiple of 4 bytes" is an afternoon.
 
 ### A6. sharp-runtime's `Parallel::For` creates one operating-system thread per iteration.
 

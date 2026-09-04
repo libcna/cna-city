@@ -905,3 +905,45 @@ the moment the block starts. The first full capture was interrupted forty minute
 left behind was a baseline holding the four scenarios that had finished and silently missing the
 fifth -- a file that still verifies, and verifies the wrong thing. It now builds the file aside and
 moves it into place, so an interrupted capture leaves the previous baseline exactly as it was.
+
+---
+
+## P23 — The renderer matrix
+
+The test this project was built to make possible: the same city, seed, hour, weather, camera and
+population through three of CNA's renderers, with the differences in one table.
+
+- [x] **P23.1 OPENGLES3, OPENGL33 and VULKAN**, four viewpoints each, on GL ES 3.2 / GL 4.6 core /
+  Vulkan 1.4 (RADV). The two GL renderers draw the same picture: identical draw calls, identical
+  triangle counts, both shadow cascades and both prepasses present, five post passes each.
+
+- [x] **P23.2 Vulkan does not.** No shadow pass, no depth-normal prepass, no post chain, no GPU
+  pass timings at all, 61 fewer draw calls, and no props, vehicles or people. Screenshots in
+  `shots/renderers/` show what that looks like beside the other two.
+
+- [x] **P23.3 Two independent causes, separated rather than lumped.** The missing instancing is
+  the system working: the Vulkan backend reports `MultiStreamVertexInput` as unsupported *on
+  purpose*, with a comment saying it would rather reject a draw than render it from the wrong
+  stream, and that answer travels through `InstancedRendererEXT` to cna-city's HUD. The missing
+  passes are one bug wearing four hats, now `CNA-FINDINGS.md` A9: the engine layer writes GLSL and
+  the Vulkan backend's shader entry point takes SPIR-V, so every CNAEXT pass that owns a shader
+  fails to compile and degrades to copy-through.
+
+- [x] **P23.4 The timings from that run are not reported.** The load average recorded in each
+  `system.json` was 23, 58 and 26 on a sixteen-thread machine, so the numbers describe what else
+  the box was doing. What does not move with load -- draw calls, triangle counts, which passes ran,
+  what the frame looks like -- is what the findings rest on. The report's load-average field
+  earned its place here: without it this section would have been a table of confident nonsense
+  about OPENGL33 being 1.5x slower than OPENGLES3.
+
+### What A9 shows about CNA that is easy to miss
+
+Nothing crashed and nothing lied. Every pass logged exactly what happened and why -- *"its shader
+did not compile on the VULKAN renderer, so the pass will copy its input through instead of
+running"* -- which is precisely the diagnostic A5 complains is missing everywhere but transparency.
+`CascadedShadowMap` reports `isSupported() == false` so a caller can react, and cna-city does, and
+the user is told on screen. The degradation is graceful and legible from top to bottom.
+
+That is worth saying plainly, because a findings list naturally collects the failures: the layer
+handled a total shader-compilation failure across every one of its passes without a single
+incorrect frame or a single silent one. What is wrong is that it is happening at all.

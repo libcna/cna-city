@@ -407,6 +407,44 @@ default and it is not cheap: each renderer is a separate configure and a full re
 the script reuses one shared scratch build directory and measures them one after another rather
 than leaving a tree per renderer behind.
 
+### What the renderer matrix found
+
+The same city, seed, hour and camera through three of CNA's renderers. Four viewpoints each, at
+`high` quality, on GL ES 3.2 / GL 4.6 core / Vulkan 1.4 (RADV), Mesa 25.0.7, AMD Radeon 780M:
+
+| | draw calls | triangles | shadow pass | prepass | post passes recorded |
+|---|---|---|---|---|---|
+| OPENGLES3 | 483 | 178 090 | 16.10 ms | present | 5 |
+| OPENGL33 | 483 | 178 090 | 25.36 ms | present | 5 |
+| VULKAN | 422 | 178 090 | **0.00 ms** | **absent** | **0** |
+
+The two GL renderers draw the same picture. Vulkan does not, and it says so on screen: the HUD
+reads `HARDWARE INSTANCING UNAVAILABLE ON THIS RENDERER — PROPS, VEHICLES AND PEOPLE ARE NOT
+DRAWN`, and the frame arrives with no shadows, no sky model and none of the post chain.
+
+There are two independent causes and they are worth separating.
+
+**The instancing gap is the system working.** `VulkanRenderer::SupportsCapability` returns false
+for `MultiStreamVertexInput` with a comment explaining that its pipelines bake a single vertex
+binding, "reported honestly so an ordinary multi-stream draw is rejected before submission instead
+of rendering from stream 0 alone". `InstancedRendererEXT` asks for that capability, cna-city asks
+`isInstancingSupported()`, and the answer reaches the screen. A missing feature that announces
+itself is not a defect.
+
+**The missing passes are one bug wearing four hats**, and it is
+[`CNA-FINDINGS.md`](CNA-FINDINGS.md) A9: the engine layer authors its shaders in GLSL and the
+Vulkan backend's shader entry point takes SPIR-V bytecode. Every CNAEXT pass that owns a shader
+therefore fails to compile with `SPIR-V size must be a multiple of 4 bytes`, and each one degrades
+to copying its input through. That is why one row of that table is empty rather than slow.
+
+**The timings in that run are not comparable and are not quoted here.** The one-minute load average
+recorded in each `system.json` was 23, 58 and 26 on a sixteen-thread machine — the OPENGL33 pass
+ran while the box was carrying three times its own cores in other work, and its numbers say so
+rather than saying anything about OPENGL33. Draw calls, triangle counts, which passes ran and what
+the frame looks like do not move with load, which is why those are the findings. That the report
+records the load average at all is the reason this paragraph can be written instead of a wrong
+table.
+
 Each scale is measured `--repeat` times and the **fastest** run is reported with the **spread**
 beside it. That is not cherry-picking: two runs of the same build do identical work, so the
 difference between them is whatever else the machine was doing, and the minimum is the closest
@@ -479,9 +517,8 @@ the shadow cascades put the renderer ahead, and at street level the simulation i
 two even with almost nothing on screen. The whole static city is 246 000 triangles.
 
 What CNA could not do here is written down as plainly as what it could, in
-[`CNA-FINDINGS.md`](CNA-FINDINGS.md) — eight capability gaps, each checked against CNA's own
-source before it was written down, and four things that looked like engine defects and turned
-out to be this program's mistakes. Every defect found on the way — including the four that
+[`CNA-FINDINGS.md`](CNA-FINDINGS.md) — nine capability gaps, each checked against CNA's own
+source before it was written down, and four things that looked like engine defects and were not. Every defect found on the way — including the four that
 produced a city where nobody ever arrived anywhere, the one that made every road invisible, and
 the one that quietly removed every roof — is in [`ARCHITECTURE.md`](ARCHITECTURE.md), with the
 measurement beside each claim.

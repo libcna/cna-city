@@ -1,7 +1,7 @@
 # Framework fixes found by CNA City
 
-CNA City exists to bend CNA until something gives and then say precisely what gave. Eight such
-things are recorded in [`../CNA-FINDINGS.md`](../CNA-FINDINGS.md) as capability gaps, A1 to A8;
+CNA City exists to bend CNA until something gives and then say precisely what gave. Nine such
+things are recorded in [`../CNA-FINDINGS.md`](../CNA-FINDINGS.md) as capability gaps, A1 to A9;
 this directory holds the ones that have a *fix* rather than only a diagnosis, as patches against
 `../../cnanext` and `../../sharp-runtimenext`.
 
@@ -31,10 +31,12 @@ Each patch carries, in its own header:
 be careful with: the other two fill in a call that was missing, and that one changes how work is
 partitioned across threads. Its header says what to run before landing it.
 
-The four with no patch here — A1 (lights or a texture set, never both), A2 (no attribute slot for
+The five with no patch here — A1 (lights or a texture set, never both), A2 (no attribute slot for
 a per-instance colour), A4 (`AtmosphericSky` below the horizon), A5 (only transparency reports a
-fallback) — are engine design questions rather than defects with an obvious fix, and saying so is
-more useful than guessing at one. Three patches, one note, four left open: that is all eight.
+fallback), A9 (the engine layer writes GLSL, the Vulkan backend takes SPIR-V) — are engine design
+questions rather than defects with an obvious fix, and saying so is more useful than guessing at
+one. A9 in particular is somebody's decision about where a shader language boundary belongs, not a
+line to change. Three patches, one note, five left open: that is all nine.
 
 ## Applying one
 
