@@ -38,6 +38,30 @@ questions rather than defects with an obvious fix, and saying so is more useful 
 one. A9 in particular is somebody's decision about where a shader language boundary belongs, not a
 line to change. Three patches, one note, five left open: that is all nine.
 
+## Status against the current `next`
+
+Re-checked on 2026-09-04 against `cnanext` `c9d8bfd` and `sharp-runtimenext` `c3fbb95`, which is
+where both checkouts stood after the CNA work this project was waiting on landed:
+
+| patch | target | applies |
+|---|---|---|
+| `a3-texture-mip-generation.patch` | cnanext `c9d8bfd` | cleanly |
+| `a8-volumetric-fog-light.patch` | cnanext `c9d8bfd` | cleanly |
+| `a6-parallel-for-partitioning.patch` | sharp-runtimenext `c3fbb95` | cleanly |
+
+Checked with `git apply --check`, which modifies nothing; both trees were verified untouched
+afterwards. **That is a weaker claim than it looks and is deliberately all that was checked.** It
+says the surrounding code has not moved under these diffs. It does not say they still compile
+against this revision, that their behaviour is still right, or that A6's threading semantics are
+what that project wants today -- and finding out would mean applying them to a checkout other work
+shares, which is the thing this directory exists to avoid.
+
+So they remain candidates, not proposals. Whoever picks them up should apply each one to a quiet
+tree, build it, run that project's own suite, and judge A6 hardest: it changes how work is
+partitioned across threads and leaves the other `Parallel` overloads -- `ParallelLoopState`,
+`ForEach` -- on the old behaviour, so it is a semantic decision for sharp-runtime rather than a
+fix to accept on this project's say-so.
+
 ## Applying one
 
 ```sh
