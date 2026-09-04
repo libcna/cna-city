@@ -418,13 +418,18 @@ The same city, seed, hour and camera through three of CNA's renderers. Four view
 | OPENGL33 | 483 | 178 090 | 25.36 ms | present | 5 |
 | VULKAN | 422 | 178 090 | **0.00 ms** | **absent** | **0** |
 
+The empty last column is its own finding rather than a consequence of the others: EasyGL is the
+only renderer in CNA that implements a GPU timer query at all, so *no* renderer outside the GL
+family can say where its frame went. That is [A10](CNA-FINDINGS.md).
+
 The two GL renderers draw the same picture. Vulkan does not, and it says so on screen: the HUD
 reads `HARDWARE INSTANCING UNAVAILABLE ON THIS RENDERER — PROPS, VEHICLES AND PEOPLE ARE NOT
 DRAWN`, and the frame arrives with no shadows, no sky model and none of the post chain.
 
 There are two independent causes and they are worth separating.
 
-**The instancing gap is the system working.** `VulkanRenderer::SupportsCapability` returns false
+**The instancing gap is the system working** ([A11](CNA-FINDINGS.md)).
+`VulkanRenderer::SupportsCapability` returns false
 for `MultiStreamVertexInput` with a comment explaining that its pipelines bake a single vertex
 binding, "reported honestly so an ordinary multi-stream draw is rejected before submission instead
 of rendering from stream 0 alone". `InstancedRendererEXT` asks for that capability, cna-city asks
@@ -517,7 +522,7 @@ the shadow cascades put the renderer ahead, and at street level the simulation i
 two even with almost nothing on screen. The whole static city is 246 000 triangles.
 
 What CNA could not do here is written down as plainly as what it could, in
-[`CNA-FINDINGS.md`](CNA-FINDINGS.md) — nine capability gaps, each checked against CNA's own
+[`CNA-FINDINGS.md`](CNA-FINDINGS.md) — eleven capability gaps, each checked against CNA's own
 source before it was written down, and four things that looked like engine defects and were not. Every defect found on the way — including the four that
 produced a city where nobody ever arrived anywhere, the one that made every road invisible, and
 the one that quietly removed every roof — is in [`ARCHITECTURE.md`](ARCHITECTURE.md), with the

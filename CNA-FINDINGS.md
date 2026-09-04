@@ -200,6 +200,63 @@ for one of the shipped renderers and should say so. The alignment message should
 actual problem: "this renderer expects SPIR-V, not GLSL" is a five-minute fix for whoever hits it
 next, and "SPIR-V size must be a multiple of 4 bytes" is an afternoon.
 
+### A10. GPU pass timing exists on exactly one renderer family.
+
+`IGraphicsRenderer::SupportsGpuTimerEXT()` is `virtual ... { return false; }`
+(`modules/graphics/include/CNA/Internal/Renderers/Common/IGraphicsRenderer.hpp:2382`) and **EasyGL
+is the only renderer in the tree that overrides it**:
+
+```
+$ grep -rln 'SupportsGpuTimerEXT' modules/renderers/*/src/*.cpp
+modules/renderers/easygl/src/EasyGLRenderer.cpp
+```
+
+Vulkan, BGFX, SDL_GPU, Metal, the DirectX family and every other backend inherit the default. So a
+program that measures where its frame goes can do so on OPENGLES2/3, OPENGL33 and WebGL, and on
+nothing else. Measured: `passes.csv` from a `--report` run holds five post-pass timings per
+viewpoint on both GL renderers and is **empty** on VULKAN.
+
+For Vulkan specifically the default is not the honest answer the base class describes.
+`VK_QUERY_TYPE_TIMESTAMP` with `vkCmdWriteTimestamp` is core Vulkan 1.0, not an extension: the API
+has the timer query, and the renderer simply does not implement it. The comment on the default --
+"false is the honest answer wherever the underlying API has no timer query" -- is exactly right and
+does not describe this case.
+
+**What is good about it.** `CreateGpuTimerEXT` returns null rather than a stub, and its own comment
+says why: "so a caller cannot mistake 'no timer here' for 'this pass took no time'". `GpuTimer`
+turns that into a sentence naming the renderer and the extension a caller would need. Nothing here
+reports a zero as a measurement, which is the failure mode that matters.
+
+**Suggested:** implement it for Vulkan, where the API already has it. For the backends whose API
+genuinely has no timer query, the current default and its explanation are correct as they stand.
+
+### A11. Vulkan cannot draw instanced geometry, because it has one vertex binding.
+
+`VulkanRenderer::SupportsCapability` returns false for `MultiStreamVertexInput`
+(`modules/renderers/vulkan/src/VulkanRenderer.cpp:1747`), and says why in the code:
+
+> `// REMED-GFX-201: not yet implemented here. Every 3D pipeline in this renderer bakes a single`
+> `// VkVertexInputBindingDescription at binding 0 with combined-layout attribute offsets, so a`
+> `// second per-vertex stream has no binding to reach and no attribute to claim.`
+
+`InstancedRendererEXT::isInstancingSupported()` needs both `Instancing` and
+`MultiStreamVertexInput`, because the instanced path binds transforms as stream 1 -- so on Vulkan
+it answers false, and a program that draws its crowds, vehicles and street furniture through it
+draws none of them. Measured: 422 draw calls against the GL renderers' 483, and every prop, vehicle
+and pedestrian missing from the frame.
+
+**What is good about it.** This is the whole capability system working end to end. The renderer
+declares the gap rather than rendering the wrong thing -- "reported honestly so an ordinary
+multi-stream draw is rejected before submission instead of rendering from stream 0 alone" --
+`InstancedRendererEXT` asks the right pair of questions after learning that asking only about
+`Instancing` believed SDL_GPU's inherited `true`, and a caller can put the answer on screen, which
+is what this program does. A missing feature that announces itself is not a defect. It is still a
+missing feature, which is why it is in this section.
+
+**Suggested:** nothing beyond what REMED-GFX-201 already says. Recorded here so that "Vulkan draws
+no crowd" is a known limitation with a reference rather than a surprise for the next person who
+runs the renderer matrix.
+
 ### A6. sharp-runtime's `Parallel::For` creates one operating-system thread per iteration.
 
 `System::Threading::Tasks::Parallel::For` calls `std::async(std::launch::async, …)` per index and

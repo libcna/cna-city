@@ -1,7 +1,7 @@
 # Framework fixes found by CNA City
 
-CNA City exists to bend CNA until something gives and then say precisely what gave. Nine such
-things are recorded in [`../CNA-FINDINGS.md`](../CNA-FINDINGS.md) as capability gaps, A1 to A9;
+CNA City exists to bend CNA until something gives and then say precisely what gave. Eleven such
+things are recorded in [`../CNA-FINDINGS.md`](../CNA-FINDINGS.md) as capability gaps, A1 to A11;
 this directory holds the ones that have a *fix* rather than only a diagnosis, as patches against
 `../../cnanext` and `../../sharp-runtimenext`.
 
@@ -31,12 +31,14 @@ Each patch carries, in its own header:
 be careful with: the other two fill in a call that was missing, and that one changes how work is
 partitioned across threads. Its header says what to run before landing it.
 
-The five with no patch here — A1 (lights or a texture set, never both), A2 (no attribute slot for
+The seven with no patch here — A1 (lights or a texture set, never both), A2 (no attribute slot for
 a per-instance colour), A4 (`AtmosphericSky` below the horizon), A5 (only transparency reports a
-fallback), A9 (the engine layer writes GLSL, the Vulkan backend takes SPIR-V) — are engine design
-questions rather than defects with an obvious fix, and saying so is more useful than guessing at
-one. A9 in particular is somebody's decision about where a shader language boundary belongs, not a
-line to change. Three patches, one note, five left open: that is all nine.
+fallback), A9 (the engine layer writes GLSL, the Vulkan backend takes SPIR-V), A10 (only EasyGL has
+a GPU timer query), A11 (Vulkan has one vertex binding, so no instancing) — are engine design
+questions or whole unwritten backend features rather than defects with an obvious fix, and saying
+so is more useful than guessing at one. A9 is somebody's decision about where a shader-language
+boundary belongs; A11 already carries its own ticket in CNA's source. Three patches, one note,
+seven left open: that is all eleven.
 
 ## Status against the current `next`
 

@@ -170,9 +170,12 @@ weights are both zero on a clear day. See [`CNA-FINDINGS.md`](CNA-FINDINGS.md) A
 
 ## 6. What CNA could not do here
 
-Three boundaries were hit that are properties of the engine rather than of this program, and all
-are worth stating because a demo that only reports successes is not measuring anything. A fourth
-looked like one for a day -- the underground lit by an eight-a.m. sky -- and was not: CNA's cascades
+Three boundaries were hit on the renderer this program is built against, and all are worth stating
+because a demo that only reports successes is not measuring anything. Running the same city through
+OPENGL33 and VULKAN later added three more that only appear off EasyGL -- no shader of the engine
+layer compiles on Vulkan, no renderer outside the GL family has a GPU timer query, and Vulkan's
+single vertex binding rules out instancing -- which are `CNA-FINDINGS.md` A9, A10 and A11. A fourth
+boundary looked like one for a day -- the underground lit by an eight-a.m. sky -- and was not: CNA's cascades
 do place the light far enough back for the ground to occlude the sun, and this program is the thing
 that does not draw the ground into them. That is `CNA-FINDINGS.md` C4.
 
@@ -197,7 +200,7 @@ the wrong shape for five loops that run thirty times a second, so the tick uses 
 instead.
 
 The full list, with what was checked to establish each one -- and the four things that looked like
-engine defects and turned out to be this program's own mistakes -- is in
+engine defects and were not, two of them this program's own mistakes -- is in
 [`CNA-FINDINGS.md`](CNA-FINDINGS.md).
 
 ## 7. Measured

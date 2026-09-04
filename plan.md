@@ -947,3 +947,36 @@ the user is told on screen. The degradation is graceful and legible from top to 
 That is worth saying plainly, because a findings list naturally collects the failures: the layer
 handled a total shader-compilation failure across every one of its passes without a single
 incorrect frame or a single silent one. What is wrong is that it is happening at all.
+
+---
+
+## P24 — Is it all written down?
+
+Asked as a question rather than assumed, and the answer was no.
+
+- [x] **P24.1 Two findings existed only as observations.** The renderer matrix produced three
+  results and only one of them had been recorded. A9 (GLSL against SPIR-V) was written up; the
+  other two were described in the README and then left there.
+
+  - **A10. GPU pass timing exists on exactly one renderer family.**
+    `IGraphicsRenderer::SupportsGpuTimerEXT()` defaults to false and `grep -rln` over
+    `modules/renderers/*/src/*.cpp` returns exactly one file: EasyGL's. Every other backend --
+    Vulkan, BGFX, SDL_GPU, Metal, the whole DirectX family -- inherits the default, so a program
+    that wants to know where its frame went can only ask on the GL family. For Vulkan the default
+    is not the honest answer the base class describes: `VK_QUERY_TYPE_TIMESTAMP` is core Vulkan 1.0.
+  - **A11. Vulkan cannot draw instanced geometry**, because every one of its 3D pipelines bakes a
+    single vertex binding, so the transform stream has nowhere to bind. Its own source says so and
+    carries a ticket number.
+
+- [x] **P24.2 The counts and the cross-references were re-derived**, not edited by hand: eleven
+  capability gaps, four things that looked like defects and were not (two of them this program's
+  mistakes), three patches, one note, seven left open. `ARCHITECTURE.md` §6 said "three boundaries"
+  and described the EasyGL ones only; it now names the three that appear off EasyGL as well.
+
+- [x] **P24.3 Checked for anything else left lying about.** Every CNA API that this repository names
+  -- in a doc, a comment or a line of code -- appears somewhere in `CNA-FINDINGS.md`, and every
+  source comment that describes an engine limitation cites the finding it belongs to. That is a
+  coverage check rather than a proof, but it is the check that was missing.
+
+The general lesson is the same one P20 and P21 kept teaching, in a third setting: a count nobody
+re-derives drifts, and a finding that lives in a README is a finding that has not been filed.
