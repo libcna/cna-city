@@ -76,9 +76,17 @@ a change that could move one, capture the tier that contains it.
 
 ## Log
 
-### 2026-09-04 — first freeze
+### 2026-09-04 — first freeze, tagged `baseline-2026-09-04`
 
-Frozen after P21, at cna-city `60ab47b`, cnanext `c9d8bfd`, sharp-runtimenext `c3fbb95`. The state
-being frozen is: 130 tests passing; `--checksum` reproducing at half the step size and on one
+Frozen at cna-city `83f41fb`, cnanext `c9d8bfd`, sharp-runtimenext `c3fbb95`, GCC 14.2, Release,
+OPENGLES3, CNAEXT on.
+
+The state being frozen: 130 tests passing; `--checksum` reproducing at half the step size and on one
 worker thread; a seven-day soak with 168 checkpoints, zero invariant violations, both frame models
 agreeing on every digest, and no measurable accumulation in memory, route slots or queues.
+
+These five lines were produced four separate times while the capture script was being finished --
+twice before a refactor of the script and twice after, one of those runs interrupted -- and every
+digest came out identical each time, including the hundred-thousand-citizen day. That is not what
+the baseline is *for*, but it is the strongest determinism evidence this project has: four
+independent runs of a full simulated day at the headline population, agreeing bit for bit.

@@ -1,5 +1,10 @@
+# Scenarios re-run by this capture: generator oversubscribed morning-peak whole-day quarter-million 
+# Scenarios carried across from an earlier one: none
+# A carried scenario's digest was not re-checked by this capture. After a change that could move
+# it, capture the tier that contains it -- otherwise this file vouches for a figure it did not
+# produce, which is the quiet version of the mistake that made an interrupted capture dangerous.
 # What these digests were produced by. Every line here is a reason a digest is allowed to differ.
-cna-city         e4119faaa515d15f8c013bbba0b6eaa46b60f596 (1 uncommitted files, none under src/ or CMakeLists.txt)
+cna-city         83f41fbb1fc48aa9306c4d6bdb099656320ec1ea (1 uncommitted files, none under src/ or CMakeLists.txt)
 cnanext          c9d8bfd85d9fe28be2586227367bc09db1aa83a3 (clean)
 sharp-runtimenext c3fbb95872414181d88315f9d4af6fa1707ed744 (clean)
 compiler         c++ (Debian 14.2.0-19) 14.2.0
@@ -7,4 +12,4 @@ cmake            cmake version 3.31.6
 build-type       Release
 renderer         OPENGLES3
 cnaext           ON
-captured         2026-09-04T03:07:28Z
+captured         2026-09-04T04:05:37Z
